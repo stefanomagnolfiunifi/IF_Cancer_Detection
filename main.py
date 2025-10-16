@@ -7,7 +7,7 @@ from sklearn.ensemble import IsolationForest
 
 if __name__ == "__main__":
     
-    bam_folder = "bam_files" 
+    bam_folder = "BAM_Files/BAM_VERSION" 
     # 1. Initialize BamReader
     bam_reader = BamReader(bam_folder)
 
