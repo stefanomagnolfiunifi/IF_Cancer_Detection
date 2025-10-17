@@ -16,7 +16,7 @@ class BamReader:
         # Search every BAM file in the specified folder
         bam_files = glob.glob(os.path.join(self.folder_path, '*.bam'))
         
-        all_patients_features_df = pd.DataFrame()
+        
 
         print(f"Found {len(bam_files)} file BAM in the folder: {self.folder_path}")
 
@@ -35,16 +35,19 @@ class BamReader:
             all_patients_features_df.concat(single_patient_features_df, ignore_index=True)
             
         '''
-            
+        j=0
         # 1. Extract features for every read in the BAM file
         single_patient_features_df = self.extract_features_from_bam(bam_files[0])
         
         if single_patient_features_df.empty:
             print(f"  No valid data.")
-            
-        
+
         # 2. Add fragments of the patient to the overall DataFrame
-        all_patients_features_df.concat(single_patient_features_df, ignore_index=True)
+        if j == 0:
+            all_patients_features_df = single_patient_features_df.copy()
+            j = 1
+        else:
+            all_patients_features_df.concat(single_patient_features_df, ignore_index=True)
 
         #TODO: maybe set the index of the DataFrame?
         
@@ -141,7 +144,7 @@ class BamReader:
         return aggregated_features
     
     #Calculate citosine metilate ratio in given DNA sequence
-    def calculate_methylated_cytosine_ratio(read):
+    def calculate_methylated_cytosine_ratio(self,read):
         seq = read.query_sequence
         if seq is None or "MM" not in dict(read.tags):
             return None
@@ -154,6 +157,7 @@ class BamReader:
         if n_cyt == 0:
             return 0
 
+        i=0
         #NOTE: would be worth using numpy array?
         met_cyt_confidences = []
         # C+m indicates methylated cytosines
