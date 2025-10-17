@@ -16,36 +16,41 @@ class BamReader:
         # Search every BAM file in the specified folder
         bam_files = glob.glob(os.path.join(self.folder_path, '*.bam'))
         
-        all_patients_features = []
+        all_patients_features_df = pd.DataFrame()
 
         print(f"Found {len(bam_files)} file BAM in the folder: {self.folder_path}")
 
+        '''
         for bam_file_path in bam_files:
             print(f"Processing {os.path.basename(bam_file_path)}...")
             
             # 1. Extract features for every read in the BAM file
-            per_read_features = self.extract_features_from_bam(bam_file_path)
+            single_patient_features_df = self.extract_features_from_bam(bam_file_path)
             
-            if per_read_features.empty:
+            if single_patient_features_df.empty:
                 print(f"  No valid data in {os.path.basename(bam_file_path)}.")
                 continue
-                
-            # 2. Aggregate features to create a patient-level vector
-            patient_vector = self.aggregate_features_for_patient(per_read_features)
             
-            # 3. File name as patient ID
-            patient_id = os.path.basename(bam_file_path).replace('.bam', '')
-            patient_vector['patient_id'] = patient_id
+            # 2. Add fragments of the patient to the overall DataFrame
+            all_patients_features_df.concat(single_patient_features_df, ignore_index=True)
             
-            all_patients_features.append(patient_vector)
+        '''
+            
+        # 1. Extract features for every read in the BAM file
+        single_patient_features_df = self.extract_features_from_bam(bam_files[0])
+        
+        if single_patient_features_df.empty:
+            print(f"  No valid data.")
+            
+        
+        
 
-        # Convert list of dicts to DataFrame
-        patients_df = pd.DataFrame(all_patients_features).set_index('patient_id')
+        #TODO: maybe set the index of the DataFrame?
         
         # Fill NaN values with 0
-        patients_df.fillna(0, inplace=True)
+        all_patients_features_df.fillna(0, inplace=True)
         
-        self.patients_df = patients_df
+        self.patients_df = all_patients_features_df
 
 
 
@@ -53,10 +58,14 @@ class BamReader:
     def extract_features_from_bam(self,bam_path):
         
         bamfile = pysam.AlignmentFile(bam_path, "rb")
-        features_list = []
+        k = 3
+        rows = []
 
         # Iterate over each read in the BAM file
-        for read in bamfile:
+        for read in bamfile.fetch():
+
+            '''
+
             # Ignore unmapped reads and reads with low mapping quality
             if read.is_unmapped or read.mapping_quality < 10:
                 continue
@@ -89,17 +98,22 @@ class BamReader:
                 mismatches,
                 soft_clipping_count
             ])
+            '''
+            seq = read.query_sequence
+            if seq is None:
+                continue
 
+            rows.append({
+                "read_id" : read.query_name,
+                "sequence" : seq
+            })
+             
         bamfile.close()
 
         # Create the DataFrame
-        feature_df = pd.DataFrame(
-            features_list,
-            columns=['read_name', 'mapq', 'insert_size', 'mismatches', 'soft_clipping']
-        )
-        
-        # Remove reads with insert size <= 0
-        feature_df = feature_df[feature_df['insert_size'] > 0]
+        feature_df = pd.DataFrame(rows)
+
+        feature_df.to_csv("extracted_reads.csv", index=False)
 
         return feature_df
 
