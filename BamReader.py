@@ -43,7 +43,8 @@ class BamReader:
             print(f"  No valid data.")
             
         
-        
+        # 2. Add fragments of the patient to the overall DataFrame
+        all_patients_features_df.concat(single_patient_features_df, ignore_index=True)
 
         #TODO: maybe set the index of the DataFrame?
         
@@ -58,6 +59,7 @@ class BamReader:
     def extract_features_from_bam(self,bam_path):
         
         bamfile = pysam.AlignmentFile(bam_path, "rb")
+        file_name = os.path.splitext(os.path.basename(bam_path))[0]
         k = 3
         rows = []
 
@@ -103,9 +105,13 @@ class BamReader:
             if seq is None:
                 continue
 
+            met_cyt_ratio = self.calculate_methylated_cytosine_ratio(read)
+            
             rows.append({
-                "read_id" : read.query_name,
-                "sequence" : seq
+                "read_file" : file_name,
+                "sequence" : seq,
+                "length": len(seq),
+                "methilated_cytosine_ratio": met_cyt_ratio
             })
              
         bamfile.close()
@@ -113,12 +119,13 @@ class BamReader:
         # Create the DataFrame
         feature_df = pd.DataFrame(rows)
 
-        feature_df.to_csv("extracted_reads.csv", index=False)
+        feature_df.to_csv("BAM_Files/extracted_reads.csv", index=False)
 
         return feature_df
 
     #Calculate aggregated features (mean and std) for a patient based on per-read features.
     def aggregate_features_for_patient(self,per_read_df):
+
     
         if per_read_df.empty:
             return None
@@ -132,3 +139,32 @@ class BamReader:
             aggregated_features[f'{feature}_std'] = per_read_df[feature].std()
             
         return aggregated_features
+    
+    #Calculate citosine metilate ratio in given DNA sequence
+    def calculate_methylated_cytosine_ratio(read):
+        seq = read.query_sequence
+        if seq is None or "MM" not in dict(read.tags):
+            return None
+
+        tags = dict(read.tags)
+        mm = tags["MM"]
+        ml = tags.get("ML", [])
+
+        n_cyt = seq.count("C")
+        if n_cyt == 0:
+            return 0
+
+        #NOTE: would be worth using numpy array?
+        met_cyt_confidences = []
+        # C+m indicates methylated cytosines
+        for mod in mm.split(";"):
+            if not mod:
+                continue
+            n_positions = len(mod.split(",")[1:])
+            if mod.startswith("C+m"):
+                met_cyt_confidences.extend(ml[i:i+n_positions])
+        
+            i += n_positions
+
+        #NOTE: other approach could be sum(met_cyt_confidences) / (255 * len(met_cyt_confidences))
+        return sum(met_cyt_confidences) / (255 * n_cyt) 
