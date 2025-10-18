@@ -20,7 +20,8 @@ class BamReader:
 
         print(f"Found {len(bam_files)} file BAM in the folder: {self.folder_path}")
 
-        '''
+        j=0
+        bam_files = bam_files[:1]  
         for bam_file_path in bam_files:
             print(f"Processing {os.path.basename(bam_file_path)}...")
             
@@ -32,23 +33,13 @@ class BamReader:
                 continue
             
             # 2. Add fragments of the patient to the overall DataFrame
-            all_patients_features_df.concat(single_patient_features_df, ignore_index=True)
-            
-        '''
-        j=0
-        # 1. Extract features for every read in the BAM file
-        single_patient_features_df = self.extract_features_from_bam(bam_files[0])
+            if j == 0:
+                all_patients_features_df = single_patient_features_df.copy()
+                j = 1
+            else:
+                all_patients_features_df.concat(single_patient_features_df, ignore_index=True)
+
         
-        if single_patient_features_df.empty:
-            print(f"  No valid data.")
-
-        # 2. Add fragments of the patient to the overall DataFrame
-        if j == 0:
-            all_patients_features_df = single_patient_features_df.copy()
-            j = 1
-        else:
-            all_patients_features_df.concat(single_patient_features_df, ignore_index=True)
-
         #TODO: maybe set the index of the DataFrame?
         
         # Fill NaN values with 0
@@ -62,7 +53,7 @@ class BamReader:
     def extract_features_from_bam(self,bam_path):
         
         bamfile = pysam.AlignmentFile(bam_path, "rb")
-        file_name = os.path.splitext(os.path.basename(bam_path))[0]
+        file_name = (os.path.basename(bam_path)).split('_')[0]
         k = 3
         rows = []
 
@@ -112,7 +103,6 @@ class BamReader:
             
             rows.append({
                 "read_file" : file_name,
-                "sequence" : seq,
                 "length": len(seq),
                 "methilated_cytosine_ratio": met_cyt_ratio
             })

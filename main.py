@@ -19,15 +19,15 @@ if __name__ == "__main__":
         print("\n First 5 rows of the patients features DataFrame:")
         print(patients_df.head())
 
-        '''
+        
         # 3. Apply Isolation Forest to detect anomalous patients
         print("\n IF execution... ")
         
         # Initialize the model
         iso_forest = IsolationForest(n_estimators=100, contamination=0.1, random_state=42)
         
-        # Train and get predictions
-        predictions = iso_forest.fit_predict(patients_df)
+        # Train and get predictions (first columns are ID columns)
+        predictions = iso_forest.fit_predict(patients_df.iloc[:, 1:])
         
         # Add predictions to the DataFrame
         patients_df['is_anomaly'] = predictions
@@ -37,7 +37,7 @@ if __name__ == "__main__":
         
         print(f"\nIdentified {len(anomalous_patients)} anomalous patients:")
         print(anomalous_patients)
-        '''
+        
     else:
         print("No patient data available to process.")
 
