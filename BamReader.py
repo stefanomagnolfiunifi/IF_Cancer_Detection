@@ -24,7 +24,7 @@ class BamReader:
         with ProcessPoolExecutor(max_workers=32) as executor:
             futures = {
                 # 1. Extract features for every read in the BAM file
-                executor.submit(self.extract_features_from_bam, bam_file_path): bam_file_path
+                executor.submit(extract_features_from_bam, bam_file_path): bam_file_path
                 for bam_file_path in bam_files
             }
 
@@ -49,7 +49,7 @@ class BamReader:
         
         all_patients_features_df = pd.concat(feature_dfs, ignore_index=True)
             
-        #TODO: maybe set the index of the DataFrame?
+        #NOTE: maybe set the index of the DataFrame?
         
         # Fill NaN values with 0
         all_patients_features_df.fillna(0, inplace=True)
