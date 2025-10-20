@@ -24,7 +24,7 @@ if __name__ == "__main__":
         print("\n IF execution... ")
         
         # Initialize the model
-        iso_forest = IsolationForest(n_estimators=100, contamination=0.1, random_state=42)
+        iso_forest = IsolationForest(n_estimators=100, contamination=0.1, random_state=42, n_jobs=-1)
         
         # Train and get predictions (first columns are ID columns)
         predictions = iso_forest.fit_predict(patients_df.iloc[:, 1:])

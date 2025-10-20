@@ -49,7 +49,7 @@ class BamReader:
         
         all_patients_features_df = pd.concat(feature_dfs, ignore_index=True)
             
-        #TODO: maybe set the index of the DataFrame?
+        #NOTE: maybe set the index of the DataFrame?
         
         # Fill NaN values with 0
         all_patients_features_df.fillna(0, inplace=True)
@@ -124,7 +124,6 @@ def extract_features_from_bam(bam_path):
 
         return feature_df
     
-
 #Calculate citosine metilate ratio in given DNA sequence
 def calculate_methylated_cytosine_ratio(read):
     seq = read.query_sequence
