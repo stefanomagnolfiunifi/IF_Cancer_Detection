@@ -24,7 +24,7 @@ class BamReader:
         with ProcessPoolExecutor(max_workers=32) as executor:
             futures = {
                 # 1. Extract features for every read in the BAM file
-                executor.submit(self.extract_features_from_bam, bam_file_path): bam_file_path
+                executor.submit(extract_features_from_bam, bam_file_path): bam_file_path
                 for bam_file_path in bam_files
             }
 
