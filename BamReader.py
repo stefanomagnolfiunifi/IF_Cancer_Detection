@@ -28,7 +28,7 @@ class BamReader:
 
             for future in as_completed(futures):
                 bam_file_path = futures[future]
-                print(f"Processing {os.path.basename(bam_file_path)}...")
+                #print(f"Processing {os.path.basename(bam_file_path)}...")
                 try:
                     single_patient_features_df = future.result()
                     if single_patient_features_df.empty:
@@ -36,7 +36,7 @@ class BamReader:
                         continue
                     # 2. Add fragments of the patient to the overall DataFrame
                     self.patients_dfs.append(single_patient_features_df)
-                    print(f"Processed {os.path.basename(bam_file_path)} successfully.")
+                    #print(f"Processed {os.path.basename(bam_file_path)} successfully.")
                 except Exception as e:
                     print(f"Error processing {os.path.basename(bam_file_path)}: {e}")
     
@@ -111,18 +111,19 @@ def extract_features_from_bam(bam_path):
             # Methylated Cytosine Ratio
             met_cyt_ratio = calculate_methylated_cytosine_ratio(read)
             
-            rows.append({
+            row_data = {
                 "read_file" : file_name,
                 "length": len(seq),
                 "mapq": mapq,
                 "rel_pos": rel_pos,
                 "mismatches": mismatches,
                 "methilated_cytosine_ratio": met_cyt_ratio,
-            })
+            }
 
             # CIGAR features
             cigar_features = extract_cigar_features(read) 
-            rows.append(cigar_features) 
+            row_data.update(cigar_features)
+            rows.append(row_data) 
         bamfile.close()
 
         # Create the DataFrame
@@ -141,13 +142,14 @@ def extract_cigar_features(read):
     soft_clips = sum(length for (op, length) in cigar_tuples if op == 4)  # 4: soft clipping
     hard_clips = sum(length for (op, length) in cigar_tuples if op == 5)  # 5: hard clipping
     aligned_bases = sum(length for (op, length) in cigar_tuples if op in (0, 7, 8))  # 0: match or mismatch, 7: match, 8: mismatch;  both match and mismatch are aligned bases
+    not_aligned_bases = len(read.query_sequence) - aligned_bases
     clip_ratio = (soft_clips + hard_clips) / len(read.query_sequence)
 
     return {
         "num_indels": num_indels,
         "soft_clips": soft_clips,
         "hard_clips": hard_clips,
-        "aligned_bases": aligned_bases,
+        "not_aligned_bases": not_aligned_bases,
         "clip_ratio": clip_ratio
     }
 

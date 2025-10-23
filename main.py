@@ -20,7 +20,7 @@ if __name__ == "__main__":
     #NOTE: maybe set the index of the DataFrame?
     
     # Fill NaN values with 0 NOTE: must be fill with median
-    train_patients_df.fillna(0, inplace=True)
+    #train_patients_df.fillna(0, inplace=True)
 
     if train_patients_df.empty:
         print("No patient data available to process.")
@@ -32,7 +32,7 @@ if __name__ == "__main__":
         print("\n IF training... ")
         
         # Initialize the model
-        iso_forest = IsolationForest(n_estimators=100, contamination=1e-6, random_state=42, n_jobs=-1)
+        iso_forest = IsolationForest(n_estimators=20, contamination=1e-6, random_state=42, n_jobs=-1)
         
         # Train (first column excluded because is ID)
         predictions = iso_forest.fit(train_patients_df.iloc[:, 1:])
