@@ -7,7 +7,7 @@ import math
 from BamReader import BamReader
 from sklearn.ensemble import IsolationForest
 
-def plot_distributions(df: pd.DataFrame, columns_to_plot: list = None, output_filename: str = "distributions_plot.png",max_cols_per_row: int = 3):
+def plot_distributions(df: pd.DataFrame, columns_to_plot: list = None, output_filename: str = "distributions_plot.png",max_cols_per_row: int = 3, clip_quantile: float = 0.1):
 
     # Select columns to plot
     if columns_to_plot is None:
@@ -43,12 +43,22 @@ def plot_distributions(df: pd.DataFrame, columns_to_plot: list = None, output_fi
     # Plot each column
     for i, col_name in enumerate(columns_to_plot):
         ax = axes[i] # Select the appropriate axis
-        
+        data_to_plot = df[col_name].dropna()  # Remove NaN values for plotting
+        plot_title = f"Distribuzione di '{col_name}'"
         try:
             # Check if the column is numeric
             if pd.api.types.is_numeric_dtype(df[col_name]):
+
+                if clip_quantile is not None and 0 < clip_quantile < 0.5:
+                    q_low = data_to_plot.quantile(clip_quantile)
+                    q_high = data_to_plot.quantile(1 - clip_quantile)
+                    
+                    # Filtra i dati per il plot
+                    data_to_plot = data_to_plot[(data_to_plot >= q_low) & (data_to_plot <= q_high)]
+                    plot_title += f"\n(Mostra {100 - 2 * (clip_quantile * 100):.0f}% centrale)"
+
                 # Plot a histogram with KDE
-                sns.histplot(df[col_name], kde=True, ax=ax, bins=30)
+                sns.histplot(data_to_plot, kde=True, ax=ax, bins=30)
                 ax.set_title(f"Distribuzione di '{col_name}' (Numerica)")
                 ax.set_ylabel("Frequenza")
             
@@ -56,7 +66,7 @@ def plot_distributions(df: pd.DataFrame, columns_to_plot: list = None, output_fi
             elif pd.api.types.is_object_dtype(df[col_name]) or df[col_name].nunique() < 50:
                 # Plot bar chart
                 sns.countplot(x=df[col_name], ax=ax, order=df[col_name].value_counts().index)
-                ax.set_title(f"Distribuzione di '{col_name}' (Categorica)")
+                ax.set_title(plot_title)
                 ax.set_ylabel("Conteggio")
                 
                 # Rotate labels if too many categories
@@ -90,10 +100,10 @@ if __name__ == "__main__":
 
     # 2. Create patients Data Frame
     train_bam_reader.process_bam_folder()
-    plot_distributions(train_bam_reader.patients_dfs[0], output_filename="BAM_Files/patient_0_HEALTY_feature_distributions.png")
+    plot_distributions(train_bam_reader.patients_dfs[3], output_filename="BAM_Files/patient_0_HEALTY_feature_distributions.png")
     train_patients_df = pd.concat(train_bam_reader.patients_dfs, ignore_index=True) # Concatenate all patient DataFrames
 
-    #train_patients_df.to_csv("BAM_Files/extracted_reads.csv", index=False)
+    #train_patients_df.to_csv("BAM_Files/train/extracted_reads.csv", index=False)
             
     #NOTE: maybe set the index of the DataFrame?
     
