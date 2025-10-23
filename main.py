@@ -19,8 +19,8 @@ if __name__ == "__main__":
             
     #NOTE: maybe set the index of the DataFrame?
     
-    # Fill NaN values with 0
-    train_patients_df.fillna(train_patients_df.median(), inplace=True)
+    # Fill NaN values with 0 NOTE: must be fill with median
+    train_patients_df.fillna(0, inplace=True)
 
     if train_patients_df.empty:
         print("No patient data available to process.")
@@ -42,13 +42,13 @@ if __name__ == "__main__":
         test_bam_reader.process_bam_folder()
         test_patients_dfs = test_bam_reader.patients_dfs
 
-        if test_patients_dfs.empty:
+        if len(test_patients_dfs) == 0:
             print("No test patient data available to process.")
 
         result_dfs = []
         for patient_df in test_patients_dfs:
-            # Fill NaN values with 0
-            patient_df.fillna(patient_df.median(), inplace=True)
+            # Fill NaN values with 0 NOTE: must be fill with median
+            patient_df.fillna(0, inplace=True)
             predictions = iso_forest.predict(patient_df.iloc[:, 1:])
             scores = iso_forest.decision_function(patient_df.iloc[:, 1:])
             row = {
@@ -59,6 +59,8 @@ if __name__ == "__main__":
             result_dfs.append(pd.DataFrame([row]))
              
         results_df = pd.concat(result_dfs, ignore_index=True)
+        print("\n First 5 rows of the result")
+        print(results_df.head())
         results_df.to_csv("BAM_Files/anomaly_detection_results.csv", index=False)
 
 
