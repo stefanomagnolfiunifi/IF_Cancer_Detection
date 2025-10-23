@@ -8,7 +8,7 @@ class BamReader:
 
     def __init__(self, folder_path):
         self.folder_path = folder_path
-        self.patients_df = None
+        self.patients_dfs = []
 
 
     # Return a DataFrame where each row is a patient and columns are aggregated features.
@@ -18,8 +18,6 @@ class BamReader:
         bam_files = glob.glob(os.path.join(self.folder_path, '*.bam'))
         
         print(f"Found {len(bam_files)} file BAM in the folder: {self.folder_path}")
-
-        feature_dfs = []
 
         with ProcessPoolExecutor(max_workers=32) as executor:
             futures = {
@@ -37,26 +35,10 @@ class BamReader:
                         print(f"  No valid data in {os.path.basename(bam_file_path)}.")
                         continue
                     # 2. Add fragments of the patient to the overall DataFrame
-                    feature_dfs.append(single_patient_features_df)
+                    self.patients_dfs.append(single_patient_features_df)
                     print(f"Processed {os.path.basename(bam_file_path)} successfully.")
                 except Exception as e:
                     print(f"Error processing {os.path.basename(bam_file_path)}: {e}")
-        
-        if not feature_dfs:
-            print("No valid BAM files processed.")
-            self.patients_df = pd.DataFrame()
-            return
-        
-        all_patients_features_df = pd.concat(feature_dfs, ignore_index=True)
-            
-        #NOTE: maybe set the index of the DataFrame?
-        
-        # Fill NaN values with 0
-        all_patients_features_df.fillna(0, inplace=True)
-
-        all_patients_features_df.to_csv("BAM_Files/extracted_reads.csv", index=False)
-        
-        self.patients_df = all_patients_features_df
     
 
 #Extract numeric features for every read of the BAM file.
@@ -105,18 +87,42 @@ def extract_features_from_bam(bam_path):
                 soft_clipping_count
             ])
             '''
+            # Sequence
             seq = read.query_sequence
             if seq is None:
                 continue
+            
+            # Mapping Quality
+            mapq = read.mapping_quality
+            if mapq == 255:
+                continue
 
+            # Relative Position
+            midpoint = (read.reference_start + read.reference_end) // 2
+            chrom = bamfile.get_reference_name(read.reference_id) # Reference chromosome
+            rel_pos = midpoint / bamfile.get_reference_length(chrom) # Relative position in the chromosome
+
+            # Number of Mismatches
+            try:
+                mismatches = read.get_tag('NM')
+            except KeyError:
+                mismatches = 0 
+
+            # Methylated Cytosine Ratio
             met_cyt_ratio = calculate_methylated_cytosine_ratio(read)
             
             rows.append({
                 "read_file" : file_name,
                 "length": len(seq),
-                "methilated_cytosine_ratio": met_cyt_ratio
+                "mapq": mapq,
+                "rel_pos": rel_pos,
+                "mismatches": mismatches,
+                "methilated_cytosine_ratio": met_cyt_ratio,
             })
-             
+
+            # CIGAR features
+            cigar_features = extract_cigar_features(read) 
+            rows.append(cigar_features) 
         bamfile.close()
 
         # Create the DataFrame
@@ -124,6 +130,27 @@ def extract_features_from_bam(bam_path):
 
         return feature_df
     
+
+# Extract CIGAR related features from the read
+def extract_cigar_features(read):
+    cigar_tuples = read.cigartuples
+    if cigar_tuples is None:
+        return None
+    
+    num_indels = sum(length for (op, length) in cigar_tuples if op in (1, 2) )  # 1: insertion, 2: deletion
+    soft_clips = sum(length for (op, length) in cigar_tuples if op == 4)  # 4: soft clipping
+    hard_clips = sum(length for (op, length) in cigar_tuples if op == 5)  # 5: hard clipping
+    aligned_bases = sum(length for (op, length) in cigar_tuples if op in (0, 7, 8))  # 0: match or mismatch, 7: match, 8: mismatch;  both match and mismatch are aligned bases
+    clip_ratio = (soft_clips + hard_clips) / len(read.query_sequence)
+
+    return {
+        "num_indels": num_indels,
+        "soft_clips": soft_clips,
+        "hard_clips": hard_clips,
+        "aligned_bases": aligned_bases,
+        "clip_ratio": clip_ratio
+    }
+
 #Calculate citosine metilate ratio in given DNA sequence
 def calculate_methylated_cytosine_ratio(read):
     seq = read.query_sequence

@@ -7,37 +7,58 @@ from sklearn.ensemble import IsolationForest
 
 if __name__ == "__main__":
     
-    bam_folder = "BAM_Files/BAM_VERSION" 
-    # 1. Initialize BamReader
-    bam_reader = BamReader(bam_folder)
+    train_folder = "BAM_Files/train" 
+    # 1. Initialize BamReader for training data
+    train_bam_reader = BamReader(train_folder)
 
     # 2. Create patients Data Frame
-    bam_reader.process_bam_folder()
-    patients_df = bam_reader.patients_df
+    train_bam_reader.process_bam_folder()
+    train_patients_df = pd.concat(train_bam_reader.patients_dfs, ignore_index=True) # Concatenate all patient DataFrames
 
-    if not patients_df.empty:
+    #train_patients_df.to_csv("BAM_Files/extracted_reads.csv", index=False)
+            
+    #NOTE: maybe set the index of the DataFrame?
+    
+    # Fill NaN values with 0
+    train_patients_df.fillna(train_patients_df.median(), inplace=True)
+
+    if train_patients_df.empty:
+        print("No patient data available to process.")
+    else:
         print("\n First 5 rows of the patients features DataFrame:")
-        print(patients_df.head())
+        print(train_patients_df.head())
 
-        
-        # 3. Apply Isolation Forest to detect anomalous patients
-        print("\n IF execution... ")
+        # 3. Train Isolation Forest
+        print("\n IF training... ")
         
         # Initialize the model
-        iso_forest = IsolationForest(n_estimators=100, contamination=0.1, random_state=42, n_jobs=-1)
+        iso_forest = IsolationForest(n_estimators=100, contamination=1e-6, random_state=42, n_jobs=-1)
         
-        # Train and get predictions (first columns are ID columns)
-        predictions = iso_forest.fit_predict(patients_df.iloc[:, 1:])
+        # Train (first column excluded because is ID)
+        predictions = iso_forest.fit(train_patients_df.iloc[:, 1:])
         
-        # Add predictions to the DataFrame
-        patients_df['is_anomaly'] = predictions
-        
-        # Show anomalous patients
-        anomalous_patients = patients_df[patients_df['is_anomaly'] == -1]
-        
-        print(f"\nIdentified {len(anomalous_patients)} anomalous patients:")
-        print(anomalous_patients)
-        
-    else:
-        print("No patient data available to process.")
+        test_folder = "BAM_Files/test"
+        test_bam_reader = BamReader(test_folder)
+        test_bam_reader.process_bam_folder()
+        test_patients_dfs = test_bam_reader.patients_dfs
+
+        if test_patients_dfs.empty:
+            print("No test patient data available to process.")
+
+        result_dfs = []
+        for patient_df in test_patients_dfs:
+            # Fill NaN values with 0
+            patient_df.fillna(patient_df.median(), inplace=True)
+            predictions = iso_forest.predict(patient_df.iloc[:, 1:])
+            scores = iso_forest.decision_function(patient_df.iloc[:, 1:])
+            row = {
+                'patient_id': patient_df.iloc[0, 0],
+                'n_anomalous_reads': sum(predictions == -1),
+                'mean_anomaly_score': sum(scores)/len(scores)
+            }
+            result_dfs.append(pd.DataFrame([row]))
+             
+        results_df = pd.concat(result_dfs, ignore_index=True)
+        results_df.to_csv("BAM_Files/anomaly_detection_results.csv", index=False)
+
 
