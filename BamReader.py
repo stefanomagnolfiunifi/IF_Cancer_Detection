@@ -52,41 +52,10 @@ def extract_features_from_bam(bam_path):
         # Iterate over each read in the BAM file
         for read in bamfile.fetch():
 
-            '''
-
             # Ignore unmapped reads and reads with low mapping quality
-            if read.is_unmapped or read.mapping_quality < 10:
+            if read.is_unmapped or read.mapping_quality < 60:
                 continue
 
-        
-            mapq = read.mapping_quality
-
-            insert_size = abs(read.template_length) if read.is_paired and read.is_proper_pair else 0
-            
-            # 3. Number of Mismatches
-            try:
-                mismatches = read.get_tag('NM')
-            except KeyError:
-                mismatches = 0 # Valore di default se il tag manca
-
-            # 4. Soft Clipping
-            soft_clipping_count = 0
-            if read.cigartuples:
-                # CIGAR 'S' (4) correspond to soft clipping
-                for op, length in read.cigartuples:
-                    if op == 4:
-                        soft_clipping_count += length
-            
-            read_name = read.query_name
-
-            features_list.append([
-                read_name,
-                mapq,
-                insert_size,
-                mismatches,
-                soft_clipping_count
-            ])
-            '''
             # Sequence
             seq = read.query_sequence
             if seq is None:
@@ -114,9 +83,6 @@ def extract_features_from_bam(bam_path):
             row_data = {
                 "read_file" : file_name,
                 "length": len(seq),
-                "mapq": mapq,
-                "rel_pos": rel_pos,
-                "mismatches": mismatches,
                 "methilated_cytosine_ratio": met_cyt_ratio,
             }
 
@@ -146,10 +112,6 @@ def extract_cigar_features(read):
     clip_ratio = (soft_clips + hard_clips) / len(read.query_sequence)
 
     return {
-        "num_indels": num_indels,
-        "soft_clips": soft_clips,
-        "hard_clips": hard_clips,
-        "not_aligned_bases": not_aligned_bases,
         "clip_ratio": clip_ratio
     }
 
@@ -180,8 +142,8 @@ def calculate_methylated_cytosine_ratio(read):
     
         i += n_positions
 
-    #NOTE: other approach could be sum(met_cyt_confidences) / (255 * len(met_cyt_confidences))
-    return sum(met_cyt_confidences) / (255 * n_cyt) 
+    #NOTE: other approach could be sum(met_cyt_confidences) / (255 * len(met_cyt_confidences) or (255 * n_cyt))
+    return sum(met_cyt_confidences) /  len(seq)
 
 #Calculate aggregated features (mean and std) for a patient based on per-read features.
 def aggregate_features_for_patient(per_read_df):

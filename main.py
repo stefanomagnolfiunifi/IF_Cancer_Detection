@@ -91,24 +91,34 @@ def plot_distributions(df: pd.DataFrame, columns_to_plot: list = None, output_fi
     plt.close(fig) # Chiude la figura per liberare memoria
     
     print(f"Grafico delle distribuzioni salvato come '{output_filename}'")
+
+
+def create_and_save_df(bam_folder):
+    # Initialize BamReader for training data
+    bam_reader = BamReader(bam_folder)
+
+    # Create patients Data Frame
+    bam_reader.process_bam_folder()
+    joined_patients_df = pd.concat(bam_reader.patients_dfs, ignore_index=True) # Concatenate all patient DataFrames
+    file_path = bam_folder + "/extracted_reads.csv"
+    joined_patients_df.to_csv(file_path, index=False)
+    return bam_reader.patients_dfs, joined_patients_df
+
     
 if __name__ == "__main__":
     
     train_folder = "BAM_Files/train" 
-    # 1. Initialize BamReader for training data
-    train_bam_reader = BamReader(train_folder)
+    
+    train_patients_df = create_and_save_df(train_folder)[1]
 
-    # 2. Create patients Data Frame
-    train_bam_reader.process_bam_folder()
-    plot_distributions(train_bam_reader.patients_dfs[3], output_filename="BAM_Files/patient_0_HEALTY_feature_distributions.png")
-    train_patients_df = pd.concat(train_bam_reader.patients_dfs, ignore_index=True) # Concatenate all patient DataFrames
+    #plot_distributions(train_bam_reader.patients_dfs[3], output_filename="BAM_Files/patient_0_HEALTY_feature_distributions.png")
+    
+    train_patients_df = pd.read_csv(train_folder + "/extracted_reads.csv")  
 
-    #train_patients_df.to_csv("BAM_Files/train/extracted_reads.csv", index=False)
-            
     #NOTE: maybe set the index of the DataFrame?
     
     # Fill NaN values with 0 NOTE: must be fill with median
-    #train_patients_df.fillna(0, inplace=True)
+    train_patients_df.fillna(0, inplace=True)
 
     if train_patients_df.empty:
         print("No patient data available to process.")
@@ -120,15 +130,13 @@ if __name__ == "__main__":
         print("\n IF training... ")
         
         # Initialize the model
-        iso_forest = IsolationForest(n_estimators=20, contamination=1e-6, random_state=42, n_jobs=-1)
+        iso_forest = IsolationForest(n_estimators=100, contamination=0.1, random_state=42, n_jobs=-1)
         
         # Train (first column excluded because is ID)
         predictions = iso_forest.fit(train_patients_df.iloc[:, 1:])
         
         test_folder = "BAM_Files/test"
-        test_bam_reader = BamReader(test_folder)
-        test_bam_reader.process_bam_folder()
-        test_patients_dfs = test_bam_reader.patients_dfs
+        test_patients_dfs = create_and_save_df(test_folder)[0]
 
         if len(test_patients_dfs) == 0:
             print("No test patient data available to process.")
