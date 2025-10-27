@@ -154,7 +154,7 @@ def aggregate_features_for_patient(per_read_df):
     if per_read_df.empty:
         return None
 
-    aggregated_features = {}
+    aggregated_features = {'read_file' : per_read_df['read_file'].iloc[0]} 
     features_to_aggregate = ['length', 'methilated_cytosine_ratio', 'clip_ratio']
     
     per_read_df.fillna(0, inplace=True)

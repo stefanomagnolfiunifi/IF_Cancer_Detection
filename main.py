@@ -147,8 +147,8 @@ if __name__ == "__main__":
         scores = iso_forest.decision_function(test_patients_df.iloc[:, 1:])
         
         test_patients_df['anomaly_label'] = predictions
-        test_patients_df['anomaly_score'] = scores
-             
+        test_patients_df['anomaly_label'] = test_patients_df['anomaly_label'].map({1: 'normal', -1: 'anomaly'})
+        test_patients_df['anomaly_score'] = scores             
         
         print("\n First 5 rows of the result")
         print(test_patients_df.head())
