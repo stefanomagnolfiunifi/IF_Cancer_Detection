@@ -95,6 +95,9 @@ def extract_features_from_bam(bam_path):
         # Create the DataFrame
         feature_df = pd.DataFrame(rows)
 
+        # Aggregate features for the patient
+        feature_df = aggregate_features_for_patient(feature_df)
+
         return feature_df
     
 
@@ -148,16 +151,17 @@ def calculate_methylated_cytosine_ratio(read):
 #Calculate aggregated features (mean and std) for a patient based on per-read features.
 def aggregate_features_for_patient(per_read_df):
 
-
     if per_read_df.empty:
         return None
 
     aggregated_features = {}
-    features_to_aggregate = ['mapq', 'insert_size', 'mismatches', 'soft_clipping']
+    features_to_aggregate = ['length', 'methilated_cytosine_ratio', 'clip_ratio']
     
+    per_read_df.fillna(0, inplace=True)
     for feature in features_to_aggregate:
         # Misure di tendenza centrale e dispersione
         aggregated_features[f'{feature}_mean'] = per_read_df[feature].mean()
         aggregated_features[f'{feature}_std'] = per_read_df[feature].std()
-        
-    return aggregated_features
+    
+    aggregated_features_df = pd.DataFrame([aggregated_features])
+    return aggregated_features_df

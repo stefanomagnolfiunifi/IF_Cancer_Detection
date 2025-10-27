@@ -133,30 +133,25 @@ if __name__ == "__main__":
         iso_forest = IsolationForest(n_estimators=100, contamination=0.1, random_state=42, n_jobs=-1)
         
         # Train (first column excluded because is ID)
-        predictions = iso_forest.fit(train_patients_df.iloc[:, 1:])
+        iso_forest.fit(train_patients_df.iloc[:, 1:])
         
         test_folder = "BAM_Files/test"
-        test_patients_dfs = create_and_save_df(test_folder)[0]
+        test_patients_df = create_and_save_df(test_folder)[1]
 
-        if len(test_patients_dfs) == 0:
+        if len(test_patients_df) == 0:
             print("No test patient data available to process.")
 
-        result_dfs = []
-        for patient_df in test_patients_dfs:
-            # Fill NaN values with 0 NOTE: must be fill with median
-            patient_df.fillna(0, inplace=True)
-            predictions = iso_forest.predict(patient_df.iloc[:, 1:])
-            scores = iso_forest.decision_function(patient_df.iloc[:, 1:])
-            row = {
-                'patient_id': patient_df.iloc[0, 0],
-                'n_anomalous_reads': sum(predictions == -1),
-                'mean_anomaly_score': sum(scores)/len(scores)
-            }
-            result_dfs.append(pd.DataFrame([row]))
+        # Fill NaN values with 0 NOTE: must be fill with median
+        test_patients_df.fillna(0, inplace=True)
+        predictions = iso_forest.predict(test_patients_df.iloc[:, 1:])
+        scores = iso_forest.decision_function(test_patients_df.iloc[:, 1:])
+        
+        test_patients_df['anomaly_label'] = predictions
+        test_patients_df['anomaly_score'] = scores
              
-        results_df = pd.concat(result_dfs, ignore_index=True)
+        
         print("\n First 5 rows of the result")
-        print(results_df.head())
-        results_df.to_csv("BAM_Files/anomaly_detection_results.csv", index=False)
+        print(test_patients_df.head())
+        test_patients_df.to_csv("BAM_Files/anomaly_detection_results.csv", index=False)
 
 
