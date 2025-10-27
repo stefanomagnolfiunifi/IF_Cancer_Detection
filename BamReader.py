@@ -2,6 +2,8 @@ import pysam
 import pandas as pd
 import glob
 import os
+import math
+from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 class BamReader:
@@ -39,7 +41,21 @@ class BamReader:
                     #print(f"Processed {os.path.basename(bam_file_path)} successfully.")
                 except Exception as e:
                     print(f"Error processing {os.path.basename(bam_file_path)}: {e}")
-    
+
+def seq_entropy(seq):
+    counts = Counter(seq)
+    L = len(seq)
+    if L == 0: return 0.0
+    ent = 0.0
+    for v in counts.values():
+        p = v / L
+        ent -= p * math.log2(p)
+    return ent
+
+def gc_content(seq):
+    if not seq: return 0.0
+    g = seq.count('G') + seq.count('C')
+    return g / len(seq)
 
 #Extract numeric features for every read of the BAM file.
 def extract_features_from_bam(bam_path):
@@ -52,38 +68,65 @@ def extract_features_from_bam(bam_path):
         # Iterate over each read in the BAM file
         for read in bamfile.fetch():
 
-            # Ignore unmapped reads and reads with low mapping quality
-            if read.is_unmapped or read.mapping_quality < 60:
-                continue
-
-            # Sequence
-            seq = read.query_sequence
-            if seq is None:
-                continue
-            
-            # Mapping Quality
+            # flags / basic
+            flags = read.flag
+            is_supp = read.is_supplementary
+            is_sec = read.is_secondary
+            is_dup = read.is_duplicate
             mapq = read.mapping_quality
-            if mapq == 255:
-                continue
 
-            # Relative Position
-            midpoint = (read.reference_start + read.reference_end) // 2
-            chrom = bamfile.get_reference_name(read.reference_id) # Reference chromosome
-            rel_pos = midpoint / bamfile.get_reference_length(chrom) # Relative position in the chromosome
+            seq = read.query_sequence or ""
+            qual = read.query_qualities or []
 
-            # Number of Mismatches
+            # CIGAR parsing
+            soft_left = 0
+            soft_right = 0
+            if read.cigartuples:
+                # cigartuples: list of (op, length) where op 4=softclip 5=hardclip 1=ins 2=del
+                if read.cigartuples[0][0] == 4:
+                    soft_left = read.cigartuples[0][1]
+                if read.cigartuples[-1][0] == 4:
+                    soft_right = read.cigartuples[-1][1]
+                num_ins = sum(l for op,l in read.cigartuples if op==1)
+                num_del = sum(l for op,l in read.cigartuples if op==2)
+            else:
+                num_ins = num_del = 0
+
+            nm = None
             try:
-                mismatches = read.get_tag('NM')
+                nm = read.get_tag('NM')
             except KeyError:
-                mismatches = 0 
+                nm = None
 
-            # Methylated Cytosine Ratio
-            met_cyt_ratio = calculate_methylated_cytosine_ratio(read)
-            
+            # methylation tags common in ONT: 'Mm' (mods) and 'Ml' confidences; adapt if different
+            num_meth_cpg = 0
+            mean_meth_conf = None
+            try:
+                mm = read.get_tag('Mm')  # format varies
+                ml = read.get_tag('Ml')  # list of confidences
+                # parsing Mm/Ml is nontrivial; here assume ml is list and cpG count equals length
+                if isinstance(ml, (list, tuple)):
+                    mean_meth_conf = sum(ml)/len(ml) if len(ml)>0 else None
+                    num_meth_cpg = len(ml)
+            except KeyError:
+                mean_meth_conf = None
+
             row_data = {
-                "read_file" : file_name,
-                "length": len(seq),
-                "methilated_cytosine_ratio": met_cyt_ratio,
+                'is_supplementary': int(is_supp),
+                'is_secondary': int(is_sec),
+                'is_duplicate': int(is_dup),
+                'mapq': mapq,
+                'nm': nm if nm is not None else -1,
+                'soft_left': soft_left,
+                'soft_right': soft_right,
+                'num_ins': num_ins,
+                'num_del': num_del,
+                'seq_len': len(seq),
+                'gc': gc_content(seq),
+                'entropy': seq_entropy(seq),
+                'mean_base_q': (sum(qual)/len(qual)) if qual else -1,
+                'num_methylated_calls': num_meth_cpg,
+                'mean_meth_conf': mean_meth_conf if mean_meth_conf is not None else -1
             }
 
             # CIGAR features
