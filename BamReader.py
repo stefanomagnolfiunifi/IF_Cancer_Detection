@@ -112,9 +112,7 @@ def extract_features_from_bam(bam_path):
                 mean_meth_conf = None
 
             row_data = {
-                'is_supplementary': int(is_supp),
-                'is_secondary': int(is_sec),
-                'is_duplicate': int(is_dup),
+                'read_file': file_name,
                 'mapq': mapq,
                 'nm': nm if nm is not None else -1,
                 'soft_left': soft_left,

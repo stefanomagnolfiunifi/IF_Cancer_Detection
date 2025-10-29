@@ -7,16 +7,16 @@ import math
 from BamReader import BamReader
 from sklearn.ensemble import IsolationForest
 
-def plot_distributions(df: pd.DataFrame, output_filename: str = "features_histogram.png", left_quantile: float = 0.01, right_quantile: float = 0.99):
+def plot_distributions(df: pd.DataFrame, file_path, left_quantile: float = 0.01, right_quantile: float = 0.99):
 
     # Select only numeric columns
     numeric_cols = df.select_dtypes(include=np.number).columns
 
     # Calculate number of rows and columns for subplots
-    n_cols = 2
+    n_cols = 3
     n_rows = int(np.ceil(len(numeric_cols) / n_cols))
 
-    fig, axes = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(12, 6))
+    fig, axes = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(12, 12))
 
     # Flatten axes array for easy iteration
     axes = axes.flatten()
@@ -27,12 +27,14 @@ def plot_distributions(df: pd.DataFrame, output_filename: str = "features_histog
         # Calculate quantiles
         lower = df[col_name].quantile(left_quantile)
         upper = df[col_name].quantile(right_quantile)
+
+        weights = np.ones(len(df)) / len(df)
         
         # Create histogram
         df[col_name].hist(
             ax=ax,
-            bins=30,
-            range=(lower, upper)
+            range=(lower, upper),
+            weights = weights
         )
         ax.set_title(f"'{col_name}' distribution ({left_quantile*100:.1f}%-{right_quantile*100:.1f}%)")
 
@@ -41,7 +43,7 @@ def plot_distributions(df: pd.DataFrame, output_filename: str = "features_histog
         axes[j].axis('off')
 
     plt.tight_layout()
-    plt.savefig(train_folder + "/" + output_filename)
+    plt.savefig(file_path)
 
 
 def create_and_save_df(bam_folder):
@@ -60,11 +62,10 @@ if __name__ == "__main__":
     
     train_folder = "BAM_Files/train" 
     
-    df_list,train_patients_df = create_and_save_df(train_folder)
-    
-    plot_distributions(train_patients_df)
+    #df_list,train_patients_df = create_and_save_df(train_folder)
     
     train_patients_df = pd.read_csv(train_folder + "/extracted_reads.csv")  
+    plot_distributions(df = train_patients_df, file_path = "histograms/train_data_distributions.png")
 
     #NOTE: maybe set the index of the DataFrame?
     
@@ -87,13 +88,15 @@ if __name__ == "__main__":
         iso_forest.fit(train_patients_df.iloc[:, 1:])
         
         test_folder = "BAM_Files/test"
-        test_patients_dfs = create_and_save_df(test_folder)[0]
+        test_patients_dfs_list = create_and_save_df(test_folder)[0]
 
-        if len(test_patients_dfs) == 0:
+        if len(test_patients_dfs_list) == 0:
             print("No test patient data available to process.")
 
+        
         result_dfs = []
-        for patient_df in test_patients_dfs:
+        for patient_df in test_patients_dfs_list:
+            plot_distributions(patient_df, file_path = "histograms/test_data_distributions" + patient_df.iloc[0,0] + ".png")
             # Fill NaN values with 0 NOTE: must be fill with median
             patient_df.fillna(0, inplace=True)
             predictions = iso_forest.predict(patient_df.iloc[:, 1:])
