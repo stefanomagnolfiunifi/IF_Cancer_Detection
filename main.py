@@ -7,90 +7,41 @@ import math
 from BamReader import BamReader
 from sklearn.ensemble import IsolationForest
 
-def plot_distributions(df: pd.DataFrame, columns_to_plot: list = None, output_filename: str = "distributions_plot.png",max_cols_per_row: int = 3, clip_quantile: float = 0.1):
+def plot_distributions(df: pd.DataFrame, output_filename: str = "features_histogram.png", left_quantile: float = 0.01, right_quantile: float = 0.99):
 
-    # Select columns to plot
-    if columns_to_plot is None:
-        # Default: every numeric column
-        columns_to_plot = df.select_dtypes(include=['number']).columns
-        if len(columns_to_plot) == 0:
-            print("No column to plot found.")
-            return
-    else:
-        # Check if columns exist in DataFrame
-        columns_to_plot = [col for col in columns_to_plot if col in df.columns]
-        if len(columns_to_plot) == 0:
-            print("No column specified is in the DataFrame.")
-            return
+    # Select only numeric columns
+    numeric_cols = df.select_dtypes(include=np.number).columns
 
-    num_plots = len(columns_to_plot)
-    
-    # Set the layout of the subplots
-    num_rows = math.ceil(num_plots / max_cols_per_row)
-    
-    # Create figure and axes
-    fig_height = num_rows * 4 
-    fig_width = max_cols_per_row * 5
-    
-    fig, axes = plt.subplots(nrows=num_rows, ncols=max_cols_per_row, figsize=(fig_width, fig_height))
-    
-    # Transform axes to a flat list for easy iteration
-    if num_plots > 1:
-        axes = axes.flatten()
-    else:
-        axes = [axes] # Convert single axis to list for consistency
+    # Calculate number of rows and columns for subplots
+    n_cols = 2
+    n_rows = int(np.ceil(len(numeric_cols) / n_cols))
 
-    # Plot each column
-    for i, col_name in enumerate(columns_to_plot):
-        ax = axes[i] # Select the appropriate axis
-        data_to_plot = df[col_name].dropna()  # Remove NaN values for plotting
-        plot_title = f"Distribuzione di '{col_name}'"
-        try:
-            # Check if the column is numeric
-            if pd.api.types.is_numeric_dtype(df[col_name]):
+    fig, axes = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(12, 6))
 
-                if clip_quantile is not None and 0 < clip_quantile < 0.5:
-                    q_low = data_to_plot.quantile(clip_quantile)
-                    q_high = data_to_plot.quantile(1 - clip_quantile)
-                    
-                    # Filtra i dati per il plot
-                    data_to_plot = data_to_plot[(data_to_plot >= q_low) & (data_to_plot <= q_high)]
-                    plot_title += f"\n(Mostra {100 - 2 * (clip_quantile * 100):.0f}% centrale)"
+    # Flatten axes array for easy iteration
+    axes = axes.flatten()
 
-                # Plot a histogram with KDE
-                sns.histplot(data_to_plot, kde=True, ax=ax, bins=30)
-                ax.set_title(f"Distribuzione di '{col_name}' (Numerica)")
-                ax.set_ylabel("Frequenza")
-            
-            # Check if the column is categorical
-            elif pd.api.types.is_object_dtype(df[col_name]) or df[col_name].nunique() < 50:
-                # Plot bar chart
-                sns.countplot(x=df[col_name], ax=ax, order=df[col_name].value_counts().index)
-                ax.set_title(plot_title)
-                ax.set_ylabel("Conteggio")
-                
-                # Rotate labels if too many categories
-                if df[col_name].nunique() > 10:
-                    ax.tick_params(axis='x', rotation=45)
-            else:
-                ax.text(0.5, 0.5, f"Tipo di colonna '{col_name}' non supportato per plot", horizontalalignment='center', verticalalignment='center', transform=ax.transAxes)
-
-        except Exception as e:
-            print(f"Errore nel plottare '{col_name}': {e}")
-            ax.text(0.5, 0.5, f"Impossibile plottare '{col_name}'", horizontalalignment='center', verticalalignment='center', transform=ax.transAxes)
+    for i, col_name in enumerate(numeric_cols):
+        ax = axes[i] # current axis
         
-        ax.set_xlabel(col_name)
+        # Calculate quantiles
+        lower = df[col_name].quantile(left_quantile)
+        upper = df[col_name].quantile(right_quantile)
+        
+        # Create histogram
+        df[col_name].hist(
+            ax=ax,
+            bins=30,
+            range=(lower, upper)
+        )
+        ax.set_title(f"'{col_name}' distribution ({left_quantile*100:.1f}%-{right_quantile*100:.1f}%)")
 
-    # Clean up any unused axes
-    for j in range(num_plots, len(axes)):
-        fig.delaxes(axes[j]) # Rimuove l'asse non utilizzato
+    # Hide any unused subplots
+    for j in range(i + 1, len(axes)):
+        axes[j].axis('off')
 
-    # Save the figure
-    plt.tight_layout() # Impedisce alle etichette di sovrapporsi
-    plt.savefig(output_filename)
-    plt.close(fig) # Chiude la figura per liberare memoria
-    
-    print(f"Grafico delle distribuzioni salvato come '{output_filename}'")
+    plt.tight_layout()
+    plt.savefig(train_folder + "/" + output_filename)
 
 
 def create_and_save_df(bam_folder):
@@ -109,9 +60,9 @@ if __name__ == "__main__":
     
     train_folder = "BAM_Files/train" 
     
-    train_patients_df = create_and_save_df(train_folder)[1]
-
-    #plot_distributions(train_bam_reader.patients_dfs[3], output_filename="BAM_Files/patient_0_HEALTY_feature_distributions.png")
+    df_list,train_patients_df = create_and_save_df(train_folder)
+    
+    plot_distributions(train_patients_df)
     
     train_patients_df = pd.read_csv(train_folder + "/extracted_reads.csv")  
 
@@ -133,7 +84,7 @@ if __name__ == "__main__":
         iso_forest = IsolationForest(n_estimators=100, contamination=0.1, random_state=42, n_jobs=-1)
         
         # Train (first column excluded because is ID)
-        predictions = iso_forest.fit(train_patients_df.iloc[:, 1:])
+        iso_forest.fit(train_patients_df.iloc[:, 1:])
         
         test_folder = "BAM_Files/test"
         test_patients_dfs = create_and_save_df(test_folder)[0]
