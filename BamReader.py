@@ -43,66 +43,73 @@ class BamReader:
                     print(f"Error processing {os.path.basename(bam_file_path)}: {e}")
 
 #Extract numeric features for every read of the BAM file.
-def extract_features_from_bam(bam_path):
+def extract_features_from_bam(bam_path, selected_chrom : None, selected_mid_point : None , window_size : None):
         
-        bamfile = pysam.AlignmentFile(bam_path, "rb")
-        file_name = (os.path.basename(bam_path)).split('_')[0]
-        rows = []
+    bamfile = pysam.AlignmentFile(bam_path, "rb")
+    file_name = (os.path.basename(bam_path)).split('_')[0]
+    need_to_cut = selected_mid_point is not None and window_size is not None
+    rows = []
 
-        # Iterate over each read in the BAM file
-        for read in bamfile.fetch():
+    # Iterate over each read in the BAM file
+    for read in bamfile.fetch():
 
-            mapq = read.mapping_quality
+        chrom = bamfile.get_reference_name(read.reference_id) 
+        mid_point = (read.reference_start + read.reference_end) // 2
+        if need_to_cut and (((selected_chrom is not None and chrom != selected_chrom)) or  not (selected_mid_point - window_size//2 <= mid_point <= selected_mid_point + window_size//2)):
+            continue
 
-            seq = read.query_sequence or ""
-            qual = read.query_qualities or []
+        mapq = read.mapping_quality
 
-            # CIGAR parsing
-            soft_left = 0
-            soft_right = 0
-            if read.cigartuples:
-                # cigartuples: list of (op, length) where op 4=softclip 5=hardclip 1=ins 2=del
-                if read.cigartuples[0][0] == 4:
-                    soft_left = read.cigartuples[0][1]
-                if read.cigartuples[-1][0] == 4:
-                    soft_right = read.cigartuples[-1][1]
-                num_ins = sum(l for op,l in read.cigartuples if op==1)
-                num_del = sum(l for op,l in read.cigartuples if op==2)
-            else:
-                num_ins = num_del = 0
+        seq = read.query_sequence or ""
+        qual = read.query_qualities or []
 
+        # CIGAR parsing
+        soft_left = 0
+        soft_right = 0
+        if read.cigartuples:
+            # cigartuples: list of (op, length) where op 4=softclip 5=hardclip 1=ins 2=del
+            if read.cigartuples[0][0] == 4:
+                soft_left = read.cigartuples[0][1]
+            if read.cigartuples[-1][0] == 4:
+                soft_right = read.cigartuples[-1][1]
+            num_ins = sum(l for op,l in read.cigartuples if op==1)
+            num_del = sum(l for op,l in read.cigartuples if op==2)
+        else:
+            num_ins = num_del = 0
+
+        # NM tag: number of mismatches
+        nm = None
+        try:
+            nm = read.get_tag('NM')
+        except KeyError:
             nm = None
-            try:
-                nm = read.get_tag('NM')
-            except KeyError:
-                nm = None
-            
-             # Methylated Cytosine Ratio
-            met_cyt_ratio = calculate_methylated_cytosine_ratio(read)
-            
-            row_data = {
-                'read_file': file_name,
-                'mapq': mapq,
-                'nm': nm if nm is not None else -1,
-                'soft_left': soft_left,
-                'soft_right': soft_right,
-                'num_ins': num_ins,
-                'num_del': num_del,
-                'seq_len': len(seq),
-                'mean_base_q': (sum(qual)/len(qual)) if qual else -1,
-                'methylated_cytosine_ratio': met_cyt_ratio if met_cyt_ratio is not None else -1
-                }
+        
+        # Methylated Cytosine Ratio
+        met_cyt_ratio = calculate_methylated_cytosine_ratio(read)
+        
+        row_data = {
+            'read_file': file_name,
+            'mapq': mapq,
+            'nm': nm if nm is not None else -1,
+            'soft_left': soft_left,
+            'soft_right': soft_right,
+            'num_ins': num_ins,
+            'num_del': num_del,
+            'seq_len': len(seq),
+            'mean_base_q': (sum(qual)/len(qual)) if qual else -1,
+            'methylated_cytosine_ratio': met_cyt_ratio if met_cyt_ratio is not None else -1
+            }
 
-            # CIGAR features
-            cigar_features = extract_cigar_features(read) 
-            row_data.update(cigar_features)
-            rows.append(row_data) 
-        bamfile.close()
+        # CIGAR features
+        cigar_features = extract_cigar_features(read) 
+        row_data.update(cigar_features)
+        rows.append(row_data) 
+    bamfile.close()
 
-        # Create the DataFrame
-        feature_df = pd.DataFrame(rows)
+    # Create the DataFrame
+    feature_df = pd.DataFrame(rows)
 
-        return feature_df
+    return feature_df
     
 
 # Extract CIGAR related features from the read
