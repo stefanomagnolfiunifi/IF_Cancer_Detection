@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import math
 from BamReader import BamReader
+import CnaSegReader as csr
 from sklearn.ensemble import IsolationForest
 
 def plot_distributions(df: pd.DataFrame, file_path, left_quantile: float = 0.01, right_quantile: float = 0.99):
@@ -60,25 +61,17 @@ def create_and_save_df(bam_folder):
     
 if __name__ == "__main__":
     
-    train_folder = "BAM_Files/train" 
+    train_folder = "CHROMOSOME_INSTABILITY_hg38/train" 
     
-    #df_list,train_patients_df = create_and_save_df(train_folder)
+    train_patients_df = csr.process_folder(train_folder)
+    #train_patients_df = pd.read_csv(train_folder + "/dataframe.csv")  
     
-    train_patients_df = pd.read_csv(train_folder + "/extracted_reads.csv")  
-    plot_distributions(df = train_patients_df, file_path = "histograms/train_data_distributions.png")
-
-    #NOTE: maybe set the index of the DataFrame?
-    
-    # Fill NaN values with 0 NOTE: must be fill with median
-    train_patients_df.fillna(0, inplace=True)
 
     if train_patients_df.empty:
         print("No patient data available to process.")
     else:
-        print("\n First 5 rows of the patients features DataFrame:")
-        print(train_patients_df.head())
+        #Train Isolation Forest
 
-        # 3. Train Isolation Forest
         print("\n IF training... ")
         
         # Initialize the model
@@ -87,30 +80,16 @@ if __name__ == "__main__":
         # Train (first column excluded because is ID)
         iso_forest.fit(train_patients_df.iloc[:, 1:])
         
-        test_folder = "BAM_Files/test"
-        test_patients_dfs_list = create_and_save_df(test_folder)[0]
+        test_folder = "CHROMOSOME_INSTABILITY_hg38/test"
+        test_patients_df= csr.process_folder(test_folder)
 
-        if len(test_patients_dfs_list) == 0:
-            print("No test patient data available to process.")
+        predictions = iso_forest.predict(test_patients_df.iloc[:, 1:])
+        anomaly_scores = iso_forest.decision_function(test_patients_df.iloc[:, 1:])
 
-        
-        result_dfs = []
-        for patient_df in test_patients_dfs_list:
-            plot_distributions(patient_df, file_path = "histograms/test_data_distributions" + patient_df.iloc[0,0] + ".png")
-            # Fill NaN values with 0 NOTE: must be fill with median
-            patient_df.fillna(0, inplace=True)
-            predictions = iso_forest.predict(patient_df.iloc[:, 1:])
-            scores = iso_forest.decision_function(patient_df.iloc[:, 1:])
-            row = {
-                'patient_id': patient_df.iloc[0, 0],
-                'n_anomalous_reads': sum(predictions == -1),
-                'mean_anomaly_score': sum(scores)/len(scores)
-            }
-            result_dfs.append(pd.DataFrame([row]))
-             
-        results_df = pd.concat(result_dfs, ignore_index=True)
+        results_df = pd.DataFrame({'Patient_ID': test_patients_df.iloc[:, 0], 'Prediction': predictions, 'Anomaly_Score': anomaly_scores}) 
+
         print("\n First 5 rows of the result")
         print(results_df.head())
-        results_df.to_csv("BAM_Files/anomaly_detection_results.csv", index=False)
+        results_df.to_csv("{test_folder}/anomaly_detection_results.csv", index=False)
 
 
