@@ -40,9 +40,9 @@ def process_folder(folder_path):
         try:
             patient_id = os.path.basename(file_path).replace('.cna.seg', '')
 
-            patient_df = pd.read_csv(file_path, sep='\t', dtype={'chr': str}, na_values='NA')
+            patient_df = pd.read_csv(file_path, sep='\t', dtype={'chr': str}, na_values=['NA', 'inf'])
 
-            col_name = patient_id + '.logR_Copy_Number'
+            col_name = patient_id + '.logR'
 
             meaningful_df = patient_df[['chr', 'start', 'end', col_name]]
 
@@ -51,7 +51,7 @@ def process_folder(folder_path):
 
             # Fill NaN values with median log2 ratio
             median_log2R = patient_df[col_name].median()
-            merged_df[col_name].fillna(median_log2R, inplace=True)
+            merged_df[col_name] = merged_df[col_name].fillna(median_log2R)
             
             patient_series = merged_df.set_index('bin_name')[col_name]
             patient_series.name = os.path.basename(file_path).replace('_merged_al38_filofilter_srt.cna.seg', '')
@@ -62,6 +62,8 @@ def process_folder(folder_path):
 
     if all_log2R_series:
         all_patients_df = pd.concat(all_log2R_series, axis=1).T #Transpose to have patients as rows
+        all_patients_df.index.name = 'Patient_ID'
+        all_patients_df.columns.name =  None
         all_patients_df.to_csv(folder_path + "/dataframe.csv", index=True)
         print(f"Processed {len(all_log2R_series)} patients successfully and saved to '{folder_path}/dataframe.csv'")
         print(all_patients_df.head())

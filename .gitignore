@@ -1,6 +1,7 @@
 BAM_Files
 venv_stefano
 /histograms
+CHROMOSOME_INSTABILITY_hg38
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
