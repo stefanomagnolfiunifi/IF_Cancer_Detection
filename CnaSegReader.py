@@ -6,6 +6,11 @@ import os
 
 # Return a DataFrame row with genome bins as columns and their corresponding log2 ratio values    
 def process_folder(folder_path):
+
+    extension = ".cna.seg"
+    cna_col = ".logR"
+    #extension = ".correctedDepth.txt"
+
     chrom_lengths_hg38 = {
     '1': 248956422, '2': 242193529, '3': 198295559, '4': 190214555,
     '5': 181538259, '6': 170805979, '7': 159345973, '8': 145138636,
@@ -30,19 +35,19 @@ def process_folder(folder_path):
     df_master = pd.DataFrame(master_bins, columns=['chr', 'start', 'end', 'bin_name'])
     print(f"Master mask created with {len(df_master)} bins.")
 
-    path_to_files = folder_path + "/*.cna.seg"
+    path_to_files = folder_path + "/*" + extension
     file_list = glob.glob(path_to_files)
-    print(f"Found {len(file_list)} .cna.seg files in folder '{folder_path}'.")
+    print(f"Found {len(file_list)} '{extension}' files in folder '{folder_path}'.")
 
     all_log2R_series = []
 
     for file_path in file_list:
         try:
-            patient_id = os.path.basename(file_path).replace('.cna.seg', '')
+            patient_id = os.path.basename(file_path).replace(extension, '')
 
             patient_df = pd.read_csv(file_path, sep='\t', dtype={'chr': str}, na_values=['NA', 'inf'])
 
-            col_name = patient_id + '.logR'
+            col_name = patient_id + cna_col if extension == ".cna.seg" else 'log2_TNratio_corrected'
 
             meaningful_df = patient_df[['chr', 'start', 'end', col_name]]
 
@@ -54,7 +59,7 @@ def process_folder(folder_path):
             merged_df[col_name] = merged_df[col_name].fillna(median_log2R)
             
             patient_series = merged_df.set_index('bin_name')[col_name]
-            patient_series.name = os.path.basename(file_path).replace('_merged_al38_filofilter_srt.cna.seg', '')
+            patient_series.name = os.path.basename(file_path).replace('_merged_al38_filofilter_srt' + extension, '')
 
             all_log2R_series.append(patient_series)
         except Exception as e:
