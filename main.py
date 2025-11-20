@@ -62,59 +62,141 @@ def create_and_save_df(bam_folder):
     return bam_reader.patients_dfs, joined_patients_df
 
 def plot_cna_distributions():
-    input_folder = "CHROMOSOME_INSTABILITY_hg38"
-    output_folder = "cna_density_plots/tumor"
+    
+    healthy_folder = "CHROMOSOME_INSTABILITY_hg38/HEALTHY"  
+    tumor_folder = "CHROMOSOME_INSTABILITY_hg38"  
+    output_folder = "cna_density_plots/chromosomes"
     col_value_name = "logR"
+
+    
+    healthy_files = sorted(glob.glob(os.path.join(healthy_folder, "*.c6.csv")))
+    tumor_files = sorted(glob.glob(os.path.join(tumor_folder, "*.c6.csv")))
+
+    selected_files = healthy_files[:8] + tumor_files[:16]
+    
+    print(f"Found files: {len(healthy_files)} healty, {len(tumor_files)} tumor.")
+    
+    if not selected_files:
+        print("No file found.")
+        return
 
     chroms = [str(i) for i in range(1, 23)] + ['X', 'Y']
 
-    path_to_files = input_folder + "/*.c6.csv"
-    file_list = glob.glob(path_to_files)
-    print(f"Found {len(file_list)} '.c6.csv' files in folder '{input_folder}'.")
-
-    for file in file_list:
-
+    # chromosomes cicle
+    for chrom in chroms:
+        print(f"\n--- Plotting Chromosome {chrom} ---")
         
-        df = pd.read_csv(file)
-        fig, axes = plt.subplots(6, 4, figsize=(20,24))
+
+        cleaned_data_list = [] 
+        global_min = float('inf')
+        global_max = float('-inf')
+        
+        # Read and clean data from each file
+        for file_idx, file_path in enumerate(selected_files):
+            try:
+                df = pd.read_csv(file_path)
+                
+                # Take the name of the column
+                clean_name = file_path.replace(".cna.seg.c6.csv", '').split("/")[-1]        
+                full_col_name = clean_name + "." + col_value_name 
+
+                subset = df[df['chr'] == chrom]
+                
+                valid_series = None
+                reason = "N/A"
+
+                if not subset.empty and full_col_name in subset.columns:
+                    data = subset[full_col_name].dropna()
+                    
+                    if not data.empty:
+                        
+                        q01 = data.quantile(0.01)
+                        q99 = data.quantile(0.99)
+                        
+                        # Exclude outliers
+                        data_clean = data[(data >= q01) & (data <= q99)]
+                        
+                        if not data_clean.empty:
+                            valid_series = data_clean
+                            
+                            # Update specific chromosome min/max values
+                            curr_min = data_clean.min()
+                            curr_max = data_clean.max()
+                            if curr_min < global_min: global_min = curr_min
+                            if curr_max > global_max: global_max = curr_max
+                        else:
+                            reason = "All Outliers"
+                    else:
+                        reason = "Empty Data"
+                else:
+                    reason = "No Chr Data"
+
+                # Salviamo il risultato in memoria per usarlo nel plot subito dopo
+                cleaned_data_list.append({
+                    'data': valid_series,
+                    'name': clean_name,
+                    'group': 'Healthy' if file_idx < 8 else 'Tumor', # Identifica il gruppo
+                    'reason': reason
+                })
+                
+            except Exception as e:
+                print(f"Error occurred while reading {file_path}: {e}")
+                cleaned_data_list.append({'data': None, 'name': "Error", 'reason': str(e)})
+
+        # If no valid data found, skip plotting
+        if global_min == float('inf'):
+            print(f"No data for Chr {chrom}. Skip.")
+            continue
+
+        # Create subplots
+        fig, axes = plt.subplots(6, 4, figsize=(20, 24))
         axes = axes.flatten()
-        fig.suptitle(f"'{col_value_name}' densities for patient {file}", fontsize=20)
-        for i, chrom in enumerate(chroms):
+        
+        fig.suptitle(f"Chromosome {chrom} - {col_value_name} Distribution (Filtered 1-99%)", fontsize=20)
+        
+        # One plot for each patient
+        for i, patient in enumerate(cleaned_data_list):
+            if i >= len(axes): break 
+            
             ax = axes[i]
-
-            subset = df[df['chr']== chrom]
-            full_col_name = file.replace(".cna.seg.c6.csv", '').split("/")[-1] + "." + col_value_name 
-
-            if not subset.empty:
+            
+            if patient['data'] is not None:
+                # Blue color for Healthy, Orange for Tumor
+                colore = 'tab:blue' if patient['group'] == 'Healthy' else 'tab:orange'
+                label_grp = patient['group']
+                
                 sns.kdeplot(
-                    data=subset,
-                    x=full_col_name,
+                    data=patient['data'],
                     fill=True,
                     ax=ax,
-                    color='blue',
+                    color=colore,
                     alpha=0.6,
                     linewidth=1.5
                 )
-
-                median_logR = subset[full_col_name].median()
-                ax.axvline(median_logR, color='red', linestyle='--', alpha=0.5, label=f'Median: {median_logR:.2f}')
-
-                ax.set_title(f'Chr {chrom} (n={len(subset)})', fontweight='bold')
-                ax.set_xlabel('')
-                ax.set_ylabel('Density')
-            else:
-                ax.text(0.5, 0.5, 'No Data', ha='center', va='center', color='gray')
-                ax.set_title(f'Chr {chrom}', color='gray')
+                
+                # Global x-axis limits
+                ax.set_xlim(global_min, global_max)
+                
+                ax.set_title(f"{patient['name']} ({label_grp})", fontsize=10, fontweight='bold')
                 ax.set_xlabel('')
                 ax.set_ylabel('')
+                ax.grid(True, linestyle=':', alpha=0.6)
+            else:
+                # Empty plot with reason
+                ax.text(0.5, 0.5, patient['reason'], ha='center', va='center', color='gray')
+                ax.set_title(patient.get('name', 'N/A'), fontsize=10, color='gray')
+                ax.set_axis_off()
 
-            ax.grid(True, linestyle='--', alpha=0.6)
+        # Remove extra axes
+        for j in range(len(cleaned_data_list), len(axes)):
+            fig.delaxes(axes[j])
 
         plt.tight_layout(rect=[0, 0.03, 1, 0.97])
-        output_filename = file.split("/")[-1].replace(".cna.seg.c6.csv", f"_'{col_value_name}'_density_plot.png")
-        output_path = os.path.join(output_folder, output_filename)
-        plt.savefig(output_path, dpi = 150)
-        plt.close()
+        
+        out_file = os.path.join(output_folder, f"Chr_{chrom}_density.png")
+        plt.savefig(out_file, dpi=150)
+        plt.close(fig)
+        print(f"Plot saved: {out_file}")
         
 
 
