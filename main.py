@@ -54,25 +54,25 @@ def create_and_save_df(bam_folder):
     # Initialize BamReader for training data
     bam_reader = BamReader(bam_folder)
 
-    # Create patients Data Frame
+    # Create persons Data Frame
     bam_reader.process_bam_folder()
-    joined_patients_df = pd.concat(bam_reader.patients_dfs, ignore_index=True) # Concatenate all patient DataFrames
+    joined_persons_df = pd.concat(bam_reader.persons_dfs, ignore_index=True) # Concatenate all person DataFrames
     file_path = bam_folder + "/extracted_reads.csv"
-    joined_patients_df.to_csv(file_path, index=False)
-    return bam_reader.patients_dfs, joined_patients_df
+    joined_persons_df.to_csv(file_path, index=False)
+    return bam_reader.persons_dfs, joined_persons_df
 
 def plot_cna_distributions():
     
     healthy_folder = "CHROMOSOME_INSTABILITY_hg38/HEALTHY"  
     tumor_folder = "CHROMOSOME_INSTABILITY_hg38"  
-    output_folder = "cna_density_plots/chromosomes"
+    output_folder = "cna_density_plots/chromosomes_with_total"
     col_value_name = "logR"
 
     
     healthy_files = sorted(glob.glob(os.path.join(healthy_folder, "*.c6.csv")))
     tumor_files = sorted(glob.glob(os.path.join(tumor_folder, "*.c6.csv")))
 
-    selected_files = healthy_files[:8] + tumor_files[:16]
+    selected_files = healthy_files + tumor_files
     
     print(f"Found files: {len(healthy_files)} healty, {len(tumor_files)} tumor.")
     
@@ -118,7 +118,7 @@ def plot_cna_distributions():
                         
                         if not data_clean.empty:
                             valid_series = data_clean
-                            
+
                             # Update specific chromosome min/max values
                             curr_min = data_clean.min()
                             curr_max = data_clean.max()
@@ -131,17 +131,34 @@ def plot_cna_distributions():
                 else:
                     reason = "No Chr Data"
 
-                # Salviamo il risultato in memoria per usarlo nel plot subito dopo
+                # Add to cleaned data list
                 cleaned_data_list.append({
                     'data': valid_series,
                     'name': clean_name,
-                    'group': 'Healthy' if file_idx < 8 else 'Tumor', # Identifica il gruppo
+                    'group': 'Healthy' if file_idx < 8 else 'Tumor',
                     'reason': reason
                 })
                 
             except Exception as e:
                 print(f"Error occurred while reading {file_path}: {e}")
                 cleaned_data_list.append({'data': None, 'name': "Error", 'reason': str(e)})
+
+        combined_healthy = pd.concat([person['data'] for person in cleaned_data_list if person['group'] == 'Healthy' and person['data'] is not None])
+        combined_tumor = pd.concat([person['data'] for person in cleaned_data_list if person['group'] == 'Tumor' and person['data'] is not None])
+        cleaned_data_list = cleaned_data_list[:22]
+        
+        cleaned_data_list.append({
+            'data': combined_healthy,
+            'name': 'Combined_Healthy',
+            'group': 'Healthy',
+            'reason': 'N/A'
+        })
+        cleaned_data_list.append({
+            'data': combined_tumor,
+            'name': 'Combined_Tumor',
+            'group': 'Tumor',
+            'reason': 'N/A'
+        })
 
         # If no valid data found, skip plotting
         if global_min == float('inf'):
@@ -154,19 +171,19 @@ def plot_cna_distributions():
         
         fig.suptitle(f"Chromosome {chrom} - {col_value_name} Distribution (Filtered 1-99%)", fontsize=20)
         
-        # One plot for each patient
-        for i, patient in enumerate(cleaned_data_list):
+        # One plot for each person
+        for i, person in enumerate(cleaned_data_list):
             if i >= len(axes): break 
             
             ax = axes[i]
             
-            if patient['data'] is not None:
+            if person['data'] is not None:
                 # Blue color for Healthy, Orange for Tumor
-                colore = 'tab:blue' if patient['group'] == 'Healthy' else 'tab:orange'
-                label_grp = patient['group']
+                colore = 'tab:blue' if person['group'] == 'Healthy' else 'tab:orange'
+                label_grp = person['group']
                 
                 sns.kdeplot(
-                    data=patient['data'],
+                    data=person['data'],
                     fill=True,
                     ax=ax,
                     color=colore,
@@ -177,14 +194,14 @@ def plot_cna_distributions():
                 # Global x-axis limits
                 ax.set_xlim(global_min, global_max)
                 
-                ax.set_title(f"{patient['name']} ({label_grp})", fontsize=10, fontweight='bold')
+                ax.set_title(f"{person['name']} ({label_grp})", fontsize=10, fontweight='bold')
                 ax.set_xlabel('')
                 ax.set_ylabel('')
                 ax.grid(True, linestyle=':', alpha=0.6)
             else:
                 # Empty plot with reason
-                ax.text(0.5, 0.5, patient['reason'], ha='center', va='center', color='gray')
-                ax.set_title(patient.get('name', 'N/A'), fontsize=10, color='gray')
+                ax.text(0.5, 0.5, person['reason'], ha='center', va='center', color='gray')
+                ax.set_title(person.get('name', 'N/A'), fontsize=10, color='gray')
                 ax.set_axis_off()
 
         # Remove extra axes
@@ -204,12 +221,12 @@ if __name__ == "__main__":
     
     train_folder = "CHROMOSOME_INSTABILITY_hg38/HEALTHY" 
     
-    train_patients_df = csr.process_folder(train_folder)
-    #train_patients_df = pd.read_csv(train_folder + "/dataframe.csv", index_col='Patient_ID')  
+    train_persons_df = csr.process_folder(train_folder)
+    #train_persons_df = pd.read_csv(train_folder + "/dataframe.csv", index_col='person_ID')  
     
 
-    if train_patients_df.empty:
-        print("No patient data available to process.")
+    if train_persons_df.empty:
+        print("No person data available to process.")
     else:
         #Train Isolation Forest
 
@@ -218,17 +235,17 @@ if __name__ == "__main__":
         # Initialize the model
         iso_forest = IsolationForest(n_estimators=1000, contamination=10e-4, random_state=42, n_jobs=-1)
         
-        # Patient_ID is the index: fit, predict and decision_function exclude it 
-        iso_forest.fit(train_patients_df)
+        # person_ID is the index: fit, predict and decision_function exclude it 
+        iso_forest.fit(train_persons_df)
         
         test_folder = "CHROMOSOME_INSTABILITY_hg38"
-        test_patients_df= csr.process_folder(test_folder)
-        #test_patients_df = pd.read_csv(test_folder + "/dataframe.csv", index_col='Patient_ID')  
+        test_persons_df= csr.process_folder(test_folder)
+        #test_persons_df = pd.read_csv(test_folder + "/dataframe.csv", index_col='person_ID')  
 
-        predictions = iso_forest.predict(test_patients_df)
-        anomaly_scores = iso_forest.decision_function(test_patients_df)
+        predictions = iso_forest.predict(test_persons_df)
+        anomaly_scores = iso_forest.decision_function(test_persons_df)
 
-        results_df = pd.DataFrame({'Patient_ID': test_patients_df.index, 'Prediction': predictions, 'Anomaly_Score': anomaly_scores}) 
+        results_df = pd.DataFrame({'person_ID': test_persons_df.index, 'Prediction': predictions, 'Anomaly_Score': anomaly_scores}) 
 
         print("Sum of anomalies found: " + str(sum(predictions == -1)))
         print("Sum of anomaly scores < 0: " + str(sum(x for x in anomaly_scores if x < 0)))
