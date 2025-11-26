@@ -23,23 +23,24 @@ def process_folder(folder_path):
     bin_size = 1000000  # 1 Mb bins
     chromosomes = [str(i) for i in range(1, 23)] + ['X', 'Y']
     master_bins = []
+    loc = 0
 
     print("Creating master mask...")
     for chrom in chromosomes:
         chrom_length = (chrom_lengths_hg38[chrom] // bin_size) * bin_size # Take only full bins
         for start in range(1, chrom_length+1, bin_size):
             end = start + bin_size - 1
-            bin_name = f"{chrom}:{start}-{end}"
-            master_bins.append((chrom, start, end,bin_name))
+            loc += bin_size
+            master_bins.append((chrom, start, end, loc))
         
-    df_master = pd.DataFrame(master_bins, columns=['chr', 'start', 'end', 'bin_name'])
+    df_master = pd.DataFrame(master_bins, columns=['chr', 'start', 'end', 'loc'])
     print(f"Master mask created with {len(df_master)} bins.")
 
     path_to_files = folder_path + "/*" + extension
     file_list = glob.glob(path_to_files)
     print(f"Found {len(file_list)} '{extension}' files in folder '{folder_path}'.")
 
-    all_log2R_series = []
+    df_list = []
 
     for file_path in file_list:
         try:
@@ -58,20 +59,17 @@ def process_folder(folder_path):
             median_log2R = patient_df[col_name].median()
             merged_df[col_name] = merged_df[col_name].fillna(median_log2R)
             
-            patient_series = merged_df.set_index('bin_name')[col_name]
-            patient_series.name = os.path.basename(file_path).replace('_merged_al38_filofilter_srt' + extension, '')
+            final_df = merged_df[['loc', col_name]] # DF with absolute location of start and log2 ratio values 
 
-            all_log2R_series.append(patient_series)
+            df_list.append(final_df)
         except Exception as e:
             print(f"Error processing file {file_path}: {e}")
 
-    if all_log2R_series:
-        all_patients_df = pd.concat(all_log2R_series, axis=1).T #Transpose to have patients as rows
-        all_patients_df.index.name = 'Patient_ID'
-        all_patients_df.columns.name =  None
-        all_patients_df.to_csv(folder_path + "/dataframe.csv", index=True)
-        print(f"Processed {len(all_log2R_series)} patients successfully and saved to '{folder_path}/dataframe.csv'")
-        print(all_patients_df.head())
-        return all_patients_df
+    if df_list:
+        person_df = pd.concat(df_list, axis=1)
+        person_df.to_csv(folder_path + "/dataframe.csv", index=True)
+        print(f"Processed {len(df_list)} people successfully and saved to '{folder_path}/dataframe.csv'")
+        print(person_df.head())
+        return person_df
     else:
         print("No valid patient data processed.")
