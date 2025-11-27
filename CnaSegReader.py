@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from joblib import Parallel, delayed
 import glob
 import os
 
@@ -41,6 +42,8 @@ def process_folder(folder_path):
     print(f"Found {len(file_list)} '{extension}' files in folder '{folder_path}'.")
 
     df_list = []
+    global_min = float('inf')
+    global_max = float('-inf')
 
     for file_path in file_list:
         try:
@@ -58,18 +61,65 @@ def process_folder(folder_path):
             # Fill NaN values with median log2 ratio
             median_log2R = patient_df[col_name].median()
             merged_df[col_name] = merged_df[col_name].fillna(median_log2R)
+
+            min = merged_df[col_name].min()
+            max = merged_df[col_name].max() 
+            if min < global_min: global_min = min
+            if max > global_max: global_max = max
             
-            final_df = merged_df[['loc', col_name]] # DF with absolute location of start and log2 ratio values 
+            final_df = merged_df[['loc', col_name]].rename(columns = {col_name : cna_col.split(".")[1]}) # DF with absolute location of start and log2 ratio values 
+            final_df.name = patient_id.split("_merged_")[0]
 
             df_list.append(final_df)
         except Exception as e:
             print(f"Error processing file {file_path}: {e}")
 
     if df_list:
-        person_df = pd.concat(df_list, axis=1)
-        person_df.to_csv(folder_path + "/dataframe.csv", index=True)
-        print(f"Processed {len(df_list)} people successfully and saved to '{folder_path}/dataframe.csv'")
-        print(person_df.head())
-        return person_df
+        print(f"Processed {len(df_list)} people successfully")
+        return df_list, global_min, global_max
     else:
         print("No valid patient data processed.")
+
+
+def sample_single_dataframe(df, bins, sample_size, num_samples):
+    
+    num_mb = df.shape[0] 
+
+    # Determine maximum start index for sampling
+    max_start_index = num_mb - sample_size
+
+    start_indices = np.random.randint(0, max_start_index + 1, size=num_samples)
+
+    # Create indexes matrix 
+    idx_matrix = start_indices[:, None] + np.arange(sample_size)
+
+    # Extract logR values in a matrix num_samples x sample_size
+    samples_matrix = df['logR'].values[idx_matrix]
+
+    def get_rel_freq(row):
+        counts, _ = np.histogram(row, bins=bins)
+        total_counts = np.sum(counts)
+        return counts / total_counts # NOTE: check this normalization
+    
+    # Compute relative frequency for each sample
+    freq_matrix = np.apply_along_axis(get_rel_freq, 1, samples_matrix)
+
+    # Create Dataframe 
+    bin_labels = [f"bin_{i}" for i in range(len(bins) -1)]
+    freq_df = pd.DataFrame(freq_matrix, columns=bin_labels)
+    freq_df.name = df.name
+
+    return freq_matrix, freq_df
+
+def sample_dataframe_list(df_list, global_min, global_max, sample_size=30, num_samples=1000, num_bars=20):
+     
+    # Create histogram bins
+    num_bars = 20
+    bins = np.linspace(global_min, global_max, num_bars + 1)
+
+    n_jobs = len(df_list) if len(df_list) < os.cpu_count() else os.cpu_count()
+    results_list = Parallel(n_jobs)(
+        delayed(sample_single_dataframe)(df, bins, sample_size, num_samples) for df in df_list
+    )
+
+    return results_list

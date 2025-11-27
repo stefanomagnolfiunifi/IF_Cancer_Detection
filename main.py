@@ -219,13 +219,27 @@ def plot_cna_distributions():
 
 if __name__ == "__main__":
     
-    train_folder = "CHROMOSOME_INSTABILITY_hg38/HEALTHY" 
-    
-    train_persons_df = csr.process_folder(train_folder)
-    #train_persons_df = pd.read_csv(train_folder + "/dataframe.csv", index_col='person_ID')  
-    
+    train_folder = "CHROMOSOME_INSTABILITY_hg38/train" 
 
-    if train_persons_df.empty:
+    
+    train_df_list, global_min, global_max = csr.process_folder(train_folder)
+    sample_size = 30
+    num_samples = 1000
+    num_bars = 20
+    results_list = csr.sample_dataframe_list(train_df_list, global_min, global_max, sample_size, num_samples, num_bars)    
+
+    matrix_list = zip(*results_list)[0]
+    # Stack all the matrixes vertically
+    final_matrix = np.vstack(matrix_list)
+
+    # Create Dataframe 
+    bin_labels = [f"bin_{i}" for i in range(num_bars)]
+    train_df = pd.DataFrame(final_matrix, columns=bin_labels)
+
+    print(f"Final DataFrame shape: {train_df.shape}")
+    print(f"Final Dataframe head:\n{train_df.head()}")
+
+    if train_df.empty:
         print("No person data available to process.")
     else:
         #Train Isolation Forest
@@ -234,25 +248,28 @@ if __name__ == "__main__":
         
         # Initialize the model
         iso_forest = IsolationForest(n_estimators=1000, contamination=10e-4, random_state=42, n_jobs=-1)
+        # Fit the model
+        iso_forest.fit(train_df)
         
-        # person_ID is the index: fit, predict and decision_function exclude it 
-        iso_forest.fit(train_persons_df)
-        
-        test_folder = "CHROMOSOME_INSTABILITY_hg38"
-        test_persons_df= csr.process_folder(test_folder)
-        #test_persons_df = pd.read_csv(test_folder + "/dataframe.csv", index_col='person_ID')  
+        test_folder = "CHROMOSOME_INSTABILITY_hg38/test"
+        test_df_list= csr.process_folder(test_folder)[0] # Global min and max are not used because we use the same as training to create the bins
+        results_list = csr.sample_dataframe_list(test_df_list, global_min, global_max, sample_size, num_samples, num_bars)
+        df_list = zip(*results_list)[1]
+        row = []
 
-        predictions = iso_forest.predict(test_persons_df)
-        anomaly_scores = iso_forest.decision_function(test_persons_df)
+        for df in df_list:
+            anomaly_scores = iso_forest.decision_function(df)
+            print(f"Mean anomaly score for {df.name}: {np.mean(anomaly_scores)}")
+            print(f"Median anomaly score for {df.name}: {np.median(anomaly_scores)}")
+            row.append({
+                'person_id' : df.name,
+                'mean_anomaly_score' : np.mean(anomaly_scores),
+                'median_anomaly_score' : np.median(anomaly_scores)
+            })
 
-        results_df = pd.DataFrame({'person_ID': test_persons_df.index, 'Prediction': predictions, 'Anomaly_Score': anomaly_scores}) 
-
-        print("Sum of anomalies found: " + str(sum(predictions == -1)))
-        print("Sum of anomaly scores < 0: " + str(sum(x for x in anomaly_scores if x < 0)))
-        print("Sum of normal scores >= 0: " + str(sum(x for x in anomaly_scores if x >= 0)))
-
+        results_df = pd.DataFrame(row)
         print("\n First 5 rows of the result")
         print(results_df.head())
-        results_df.to_csv(test_folder + "/anomaly_detection_results3.csv", index=False)
+        results_df.to_csv(test_folder + "/anomaly_detection_results.csv", index=False)
 
 
