@@ -5,11 +5,12 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
+from sklearn.mixture import GaussianMixture
 import glob
 import os
 
 
-# Return a DataFrame row with genome bins as columns and their corresponding log2 ratio values    
+# Return a list of DataFrames with genome bins as columns and their corresponding log2 ratio values    
 def process_folder(folder_path):
 
     extension = ".cna.seg"
@@ -59,10 +60,12 @@ def process_folder(folder_path):
 
             # Merge with master bins to ensure all bins are represented
             merged_df = pd.merge(df_master, meaningful_df, on=['chr', 'start', 'end'], how='left')
-
+            
+            '''
             # Fill NaN values with median log2 ratio
             median_log2R = patient_df[col_name].median()
             merged_df[col_name] = merged_df[col_name].fillna(median_log2R)
+            '''
             
             final_df = merged_df[['loc', col_name]].rename(columns = {col_name : cna_col.split(".")[1]}) # DF with absolute location of start and log2 ratio values 
             final_df.attrs['name'] = patient_id.split("_merged_")[0]
@@ -136,53 +139,72 @@ def plot_sample_densities(samples_matrix, patient_id, x_limits=(-1, 1)):
     plt.savefig(filename, dpi=150)
     plt.close(fig)
 
-def sample_single_dataframe(df, bins, sample_size, num_samples):
+def sample_single_dataframe(df, sample_size, num_samples):
     
-    num_mb = df.shape[0] 
+    values = df['logR'].values
 
-    # Determine maximum start index for sampling
-    max_start_index = num_mb - sample_size
+    # Mask of Nan values (1 if NaN, 0 otherwise)
+    is_nan = np.isnan(values).astype(int)
 
-    start_indices = np.random.randint(0, max_start_index + 1, size=num_samples)
+    # Valid convolution to find number of NaNs in each window of size sample_size
+    nan_counts_in_window = np.convolve(is_nan, np.ones(sample_size, dtype=int), mode='valid')
 
+    # Take only the start indices where there are no NaNs in the window
+    valid_start_indices = np.where(nan_counts_in_window == 0)[0]
+
+    if len(valid_start_indices) == 0:
+        print(f"No valid samples available for dataframe '{df.attrs['name']}'. Returning empty results.")
+        features_df = pd.DataFrame(columns=['mean1', 'mean2', 'var1', 'var2'])
+        features_df.attrs['name'] = df.attrs['name']
+        return None
+    if len(valid_start_indices) < num_samples:
+        print(f"Only {len(valid_start_indices)} valid samples available, requested {num_samples}. Reducing number of samples.")
+        num_samples = len(valid_start_indices)
+
+    start_indices = np.random.choice(valid_start_indices, size=num_samples, replace=False)
     # Create indexes matrix 
     idx_matrix = start_indices[:, None] + np.arange(sample_size)
 
     # Extract logR values in a matrix with dim: num_samples x sample_size
     samples_matrix = df['logR'].values[idx_matrix]
 
+    def get_gmm_params(row):
 
-    means = np.mean(samples_matrix, axis=1).reshape(-1, 1)
-    stds = np.std(samples_matrix, axis=1).reshape(-1, 1)
+        row_reshaped = row.reshape(-1, 1)
 
-    def get_rel_freq(row):
-        p_low = bins[0]
-        p_high = bins[-1]
-        # Clip values to be within p_low and p_high
-        row = np.clip(row, p_low, p_high)
-        counts, _ = np.histogram(row, bins=bins)
-        total_counts = np.sum(counts)
-        return counts / total_counts # NOTE: check this normalization (because of clipping, sum(counts) is always 1)
+        try:
+
+            gmm = GaussianMixture(n_components=2, covariance_type='full', n_init=1, random_state=42)
+            gmm.fit(row_reshaped)
+
+            means = gmm.means_.flatten()
+            covariances = gmm.covariances_.flatten()
+            weights = gmm.weights_.flatten()
+            
+            # Sort to have always the same order of gaussians
+            idx_sorted = np.argsort(means)
+            means_sorted = means[idx_sorted]
+            covariances_sorted = covariances[idx_sorted]
+            weights_sorted = weights[idx_sorted]
+
+            return np.concatenate([means_sorted, covariances_sorted])
+        except Exception:
+            return np.array([np.nan, np.nan, np.nan, np.nan])
     
-    # Compute relative frequency for each sample
-    freq_matrix = np.apply_along_axis(get_rel_freq, 1, samples_matrix)
-
-    # Add means and stds as additional columns
-    freq_matrix = np.hstack([freq_matrix, means, stds])
+    # Compute gmm for each sample
+    features_matrix = np.apply_along_axis(get_gmm_params, 1, samples_matrix)
 
     # Create Dataframe 
-    bin_labels = [f"bin_{i}" for i in range(len(bins) -1)]
-    bin_labels.extend(['mean', 'std'])
-    freq_df = pd.DataFrame(freq_matrix, columns=bin_labels)
-    freq_df.attrs['name'] = df.attrs['name']
+    features_df = pd.DataFrame(features_matrix, columns=['mean1', 'mean2', 'var1', 'var2'])
+    features_df.attrs['name'] = df.attrs['name']
 
-    plot_sample_densities(samples_matrix, df.attrs['name'], x_limits=(bins[0], bins[-1]))
-    return freq_matrix, freq_df
+    #plot_sample_densities(samples_matrix, df.attrs['name'], x_limits=(bins[0], bins[-1]))
+    return features_matrix, features_df
 
-def sample_dataframe_list(df_list, bins, sample_size=30, num_samples=1000):
+def sample_dataframe_list(df_list, sample_size=30, num_samples=1000):
      
     n_jobs = len(df_list) if len(df_list) < os.cpu_count() else os.cpu_count()
     results_list = Parallel(n_jobs)(
-        delayed(sample_single_dataframe)(df, bins, sample_size, num_samples) for df in df_list
+        delayed(sample_single_dataframe)(df, sample_size, num_samples) for df in df_list
     )
     return results_list

@@ -230,10 +230,7 @@ if __name__ == "__main__":
     p_low = np.percentile(all_values, 1)
     p_high = np.percentile(all_values, 99)
 
-    p_low = -1
-    p_high = 1
-    bins = np.linspace(p_low, p_high, num_bars + 1)
-    results_list = csr.sample_dataframe_list(train_df_list, bins, sample_size, num_samples)    
+    results_list = csr.sample_dataframe_list(train_df_list, sample_size, num_samples)    
 
     matrix_list, df_list = zip(*results_list)
     # Stack all the matrixes vertically
