@@ -1,5 +1,9 @@
 import pandas as pd
 import numpy as np
+import seaborn as sns
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
 import glob
 import os
@@ -42,8 +46,6 @@ def process_folder(folder_path):
     print(f"Found {len(file_list)} '{extension}' files in folder '{folder_path}'.")
 
     df_list = []
-    global_min = float('inf')
-    global_max = float('-inf')
 
     for file_path in file_list:
         try:
@@ -61,14 +63,9 @@ def process_folder(folder_path):
             # Fill NaN values with median log2 ratio
             median_log2R = patient_df[col_name].median()
             merged_df[col_name] = merged_df[col_name].fillna(median_log2R)
-
-            min = merged_df[col_name].min()
-            max = merged_df[col_name].max() 
-            if min < global_min: global_min = min
-            if max > global_max: global_max = max
             
             final_df = merged_df[['loc', col_name]].rename(columns = {col_name : cna_col.split(".")[1]}) # DF with absolute location of start and log2 ratio values 
-            final_df.name = patient_id.split("_merged_")[0]
+            final_df.attrs['name'] = patient_id.split("_merged_")[0]
 
             df_list.append(final_df)
         except Exception as e:
@@ -76,10 +73,68 @@ def process_folder(folder_path):
 
     if df_list:
         print(f"Processed {len(df_list)} people successfully")
-        return df_list, global_min, global_max
+        return df_list
     else:
         print("No valid patient data processed.")
 
+def plot_sample_densities(samples_matrix, patient_id, x_limits=(-1, 1)):
+    n_rows, n_cols = 6,4
+    n_plots = n_rows * n_cols
+    lines_per_plot = 10
+    total_samples_needed = n_plots * lines_per_plot
+    
+    # Color palette
+    colors = sns.color_palette("tab10", lines_per_plot) 
+
+    # Subset choice
+    if len(samples_matrix) >= total_samples_needed:
+        indices = np.random.choice(len(samples_matrix), total_samples_needed, replace=False)
+        subset = samples_matrix[indices]
+    else:
+        subset = samples_matrix[:total_samples_needed]
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(24, 30), sharex=True)
+    axes = axes.flatten()
+
+    for i, ax in enumerate(axes):
+        start = i * lines_per_plot
+        end = start + lines_per_plot
+        # Take the batch of samples for this subplot
+        batch = subset[start:end]
+        
+        for row, color in zip(batch, colors):
+
+            if np.std(row) < 1e-6:
+                # With all identical values, plot a vertical line at the mean
+                ax.axvline(x=np.mean(row), color="black", alpha=0.5, linestyle='--', linewidth=1.5)
+            else:
+                try:
+                    sns.kdeplot(
+                        data=row, 
+                        ax=ax, 
+                        fill=False, 
+                        clip=x_limits,
+                        color=color, 
+                        alpha=0.6,        
+                        linewidth=1.2,
+                        warn_singular=False
+                    )
+                except Exception:
+                    pass
+        
+        ax.tick_params(labelbottom=True)
+        ax.set_xlim(x_limits)
+        ax.grid(True, linestyle=':', alpha=0.3)
+        ax.set_ylabel('')
+        
+        ax.set_title(f"Batch {i+1}", fontsize=10)
+    
+    fig.suptitle(f"Sample densities of {patient_id}", fontsize=16)
+    plt.tight_layout(rect=[0, 0.03, 1, 0.97])
+
+    filename = f"cna_density_plots/sample_densities/{patient_id}.png"
+    plt.savefig(filename, dpi=150)
+    plt.close(fig)
 
 def sample_single_dataframe(df, bins, sample_size, num_samples):
     
@@ -93,33 +148,41 @@ def sample_single_dataframe(df, bins, sample_size, num_samples):
     # Create indexes matrix 
     idx_matrix = start_indices[:, None] + np.arange(sample_size)
 
-    # Extract logR values in a matrix num_samples x sample_size
+    # Extract logR values in a matrix with dim: num_samples x sample_size
     samples_matrix = df['logR'].values[idx_matrix]
 
+
+    means = np.mean(samples_matrix, axis=1).reshape(-1, 1)
+    stds = np.std(samples_matrix, axis=1).reshape(-1, 1)
+
     def get_rel_freq(row):
+        p_low = bins[0]
+        p_high = bins[-1]
+        # Clip values to be within p_low and p_high
+        row = np.clip(row, p_low, p_high)
         counts, _ = np.histogram(row, bins=bins)
         total_counts = np.sum(counts)
-        return counts / total_counts # NOTE: check this normalization
+        return counts / total_counts # NOTE: check this normalization (because of clipping, sum(counts) is always 1)
     
     # Compute relative frequency for each sample
     freq_matrix = np.apply_along_axis(get_rel_freq, 1, samples_matrix)
 
+    # Add means and stds as additional columns
+    freq_matrix = np.hstack([freq_matrix, means, stds])
+
     # Create Dataframe 
     bin_labels = [f"bin_{i}" for i in range(len(bins) -1)]
+    bin_labels.extend(['mean', 'std'])
     freq_df = pd.DataFrame(freq_matrix, columns=bin_labels)
-    freq_df.name = df.name
+    freq_df.attrs['name'] = df.attrs['name']
 
+    plot_sample_densities(samples_matrix, df.attrs['name'], x_limits=(bins[0], bins[-1]))
     return freq_matrix, freq_df
 
-def sample_dataframe_list(df_list, global_min, global_max, sample_size=30, num_samples=1000, num_bars=20):
+def sample_dataframe_list(df_list, bins, sample_size=30, num_samples=1000):
      
-    # Create histogram bins
-    num_bars = 20
-    bins = np.linspace(global_min, global_max, num_bars + 1)
-
     n_jobs = len(df_list) if len(df_list) < os.cpu_count() else os.cpu_count()
     results_list = Parallel(n_jobs)(
         delayed(sample_single_dataframe)(df, bins, sample_size, num_samples) for df in df_list
     )
-
     return results_list
