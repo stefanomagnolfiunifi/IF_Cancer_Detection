@@ -218,82 +218,74 @@ def plot_cna_distributions():
 
 if __name__ == "__main__":
     
-    train_folder = "CHROMOSOME_INSTABILITY_hg38/train" 
-
+    healthy_folder = "CHROMOSOME_INSTABILITY_hg38/train" 
+    tumor_folder = "CHROMOSOME_INSTABILITY_hg38/test"
     
-    train_df_list = csr.process_folder(train_folder)
+    iso_forest_list = []
+    result_rows_list = []
+    
+    healthy_df_list = csr.process_folder(healthy_folder)
+    tummor_df_list= csr.process_folder(tumor_folder)
+
     sample_size = 50
     num_samples = 1000
-    num_bars = 10
 
-    all_values = np.concatenate([df['logR'].values for df in train_df_list])
-    p_low = np.percentile(all_values, 1)
-    p_high = np.percentile(all_values, 99)
+    for i in range(len(healthy_df_list)):
 
-    results_list = csr.sample_dataframe_list(train_df_list, sample_size, num_samples)    
+        train_df_list = healthy_df_list[:i] + healthy_df_list[i+1:] if i < len(healthy_df_list)-1 else healthy_df_list[:-1]
+        test_df_list = [healthy_df_list[i]] + tummor_df_list
+        all_values = np.concatenate([df['logR'].values for df in train_df_list])
+        p_low = np.percentile(all_values, 1)
+        p_high = np.percentile(all_values, 99)
 
-    matrix_list, df_list = zip(*results_list)
-    # Stack all the matrixes vertically
-    final_matrix = np.vstack(matrix_list)
+        results_list = csr.sample_dataframe_list(train_df_list, sample_size, num_samples)    
 
-    # Create Dataframe 
-    bin_labels = [f"bin_{i}" for i in range(num_bars)]
-    bin_labels.extend(['mean', 'std'])
-    train_df = pd.DataFrame(final_matrix, columns=bin_labels)
-
-    print(f"Final DataFrame shape: {train_df.shape}")
-    print(f"Final Dataframe head:\n{train_df.head()}")
-
-    if train_df.empty:
-        print("No person data available to process.")
-    else:
-        #Train Isolation Forest
-
-        print("\n IF training... ")
-        
-        # Initialize the model
-        iso_forest = IsolationForest(n_estimators=1000, contamination=0.1, random_state=42, n_jobs=-1)
-        # Fit the model
-        iso_forest.fit(train_df)
-        
-        test_folder = "CHROMOSOME_INSTABILITY_hg38/test"
-        test_df_list= csr.process_folder(test_folder)
-        results_list = csr.sample_dataframe_list(test_df_list, bins, sample_size, num_samples)
         matrix_list, df_list = zip(*results_list)
-        row = []
+        # Stack all the matrixes vertically
+        final_matrix = np.vstack(matrix_list)
 
-        fig,axes = plt.subplots(6,4, figsize=(24, 30))
-        axes = axes.flatten()
-        i=0
+        # Create Dataframe 
+        train_df = pd.DataFrame(final_matrix, columns=['mean1', 'mean2', 'var1', 'var2'])
 
-        for df in df_list:
-            anomaly_scores = iso_forest.decision_function(df)
-            df_as = pd.DataFrame(anomaly_scores, columns = ['scores'])
+        print(f"Final DataFrame shape: {train_df.shape}")
+        print(f"Final Dataframe head:\n{train_df.head()}")
 
-            if i < 23:
-                ax = axes[i]
-                ax.set_title({df.attrs['name']}, fontsize=10)
-                sns.kdeplot(
-                    data=df_as['scores'],
-                    ax = ax
-                )
-                i = i+1
-            row.append({
-                'person_id' : df.attrs['name'],
-                'mean_anomaly_score' : np.mean(anomaly_scores),
-                'count_anomaly_low' : len(anomaly_scores[anomaly_scores < -0.2]),
-                'min_anomaly_score' : np.min(anomaly_scores)
-            })
+        if train_df.empty:
+            print("No person data available to process.")
+        else:
+            #Train Isolation Forest
+            print("\n IF training... ")
+            
+            # Initialize the model
+            iso_forest = IsolationForest(n_estimators=1000, contamination=0.1, random_state=42, n_jobs=-1)
+            # Fit the model
+            iso_forest.fit(train_df)
 
-        
+            iso_forest_list.append(iso_forest)
 
-        filename = f"cna_density_plots/anomaly_scores/scores.png"
-        plt.savefig(filename, dpi=150)
-        plt.close(fig)
+            # Evaluate on test data
+            results_list = csr.sample_dataframe_list(test_df_list, sample_size, num_samples)
+            matrix_list, df_list = zip(*results_list)   
 
-        results_df = pd.DataFrame(row)
-        print("\n First 5 rows of the result")
-        print(results_df.head())
-        results_df.to_csv(test_folder + "/anomaly_detection_results3.csv", index=False)
+            rows = []
+            for df in df_list:
+                anomaly_scores = iso_forest.decision_function(df)
+                count_negative_chunks = len(anomaly_scores[anomaly_scores < 0])
+                name = 'Healthy' if df.attrs['name'].startswith('PH') else df.attrs['name'] 
+                rows.append({
+                    'name': name,
+                    'num_negative_chunks': count_negative_chunks
+                })
+            
+            # This dictionary will be used to create the DataFrame
+            dict = {row['name']: row['num_negative_chunks'] for row in rows}
+
+            result_row = pd.DataFrame([dict])
+            result_rows_list.append(result_row)
+
+    results_df = pd.concat(result_rows_list, ignore_index=True)   
+    print("\n First 5 rows of the result")
+    print(results_df.head())
+    results_df.to_csv(tumor_folder + "/anomaly_detection_results3.csv", index=False)
 
 

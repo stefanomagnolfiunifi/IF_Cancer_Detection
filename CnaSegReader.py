@@ -6,6 +6,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
 from sklearn.mixture import GaussianMixture
+from scipy.stats import norm
 import glob
 import os
 
@@ -43,7 +44,7 @@ def process_folder(folder_path):
     print(f"Master mask created with {len(df_master)} bins.")
 
     path_to_files = folder_path + "/*" + extension
-    file_list = glob.glob(path_to_files)
+    file_list = sorted(glob.glob(path_to_files))
     print(f"Found {len(file_list)} '{extension}' files in folder '{folder_path}'.")
 
     df_list = []
@@ -52,18 +53,18 @@ def process_folder(folder_path):
         try:
             patient_id = os.path.basename(file_path).replace(extension, '')
 
-            patient_df = pd.read_csv(file_path, sep='\t', dtype={'chr': str}, na_values=['NA', 'inf'])
+            df = pd.read_csv(file_path, sep='\t', dtype={'chr': str}, na_values=['NA', 'inf'])
 
             col_name = patient_id + cna_col if extension == ".cna.seg" else 'log2_TNratio_corrected'
 
-            meaningful_df = patient_df[['chr', 'start', 'end', col_name]]
+            meaningful_df = df[['chr', 'start', 'end', col_name]]
 
             # Merge with master bins to ensure all bins are represented
             merged_df = pd.merge(df_master, meaningful_df, on=['chr', 'start', 'end'], how='left')
             
             '''
             # Fill NaN values with median log2 ratio
-            median_log2R = patient_df[col_name].median()
+            median_log2R = df[col_name].median()
             merged_df[col_name] = merged_df[col_name].fillna(median_log2R)
             '''
             
@@ -139,6 +140,81 @@ def plot_sample_densities(samples_matrix, patient_id, x_limits=(-1, 1)):
     plt.savefig(filename, dpi=150)
     plt.close(fig)
 
+def plot_samples_with_gmm(samples_matrix, patient_id, x_limits=(-1, 1)):
+    n_rows, n_cols = 6,4
+    n_plots = n_rows * n_cols
+
+    # Subset choice
+    if len(samples_matrix) >= n_plots:
+        indices = np.random.choice(len(samples_matrix), n_plots, replace=False)
+        subset = samples_matrix[indices]
+    else:
+        subset = samples_matrix[:n_plots]
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(24, 30), sharex=True)
+    axes = axes.flatten()
+
+    for i, ax in enumerate(axes):    
+        row = subset[i]
+        gmm = GaussianMixture(n_components=2, covariance_type='full', n_init=1, max_iter=100, random_state=42)
+        gmm.fit(row.reshape(-1, 1))
+
+        means = gmm.means_.flatten()
+        covariances = gmm.covariances_.flatten()
+        weights = gmm.weights_.flatten()
+
+        idx_sorted = np.argsort(means)
+        means_sorted = means[idx_sorted]
+        covariances_sorted = covariances[idx_sorted]
+        weights_sorted = weights[idx_sorted]
+        
+        try:
+            sns.kdeplot(
+                data=row, 
+                ax=ax, 
+                fill=False, 
+                clip=x_limits,
+                color="red",         
+                linewidth=1.2,
+                warn_singular=False,
+                label='KDE'
+            )
+            
+            x_plot = np.linspace(x_limits[0], x_limits[1], 1000)
+
+            g1 = norm.pdf(x_plot, loc=means_sorted[0], scale=np.sqrt(covariances_sorted[0])) * weights_sorted[0]
+            g2 = norm.pdf(x_plot, loc=means_sorted[1], scale=np.sqrt(covariances_sorted[1])) * weights_sorted[1]
+
+            ax.plot(x_plot, g1, 'b:', linewidth=0.5, label=f'm: {means_sorted[0]:.2f}, v: {covariances_sorted[0]:.2f}')
+            ax.fill_between(x_plot, g1, color='blue', alpha=0.3)
+            ax.plot(x_plot, g2, 'g:', linewidth=0.5, label=f'm: {means_sorted[1]:.2f}, v: {covariances_sorted[1]:.2f}')
+            ax.fill_between(x_plot, g2, color='green', alpha=0.3)
+
+            '''
+            g_total = g1 + g2
+            ax.plot(x_plot, g_total, 'k--', linewidth=1.2, label='GMM Total')
+            ax.fill_between(x_plot, g_total, color='gray', alpha=0.3)
+            '''
+        except Exception as e:
+            print(f"Error plotting {patient_id}: {e}")
+            
+        
+        ax.legend()
+        ax.tick_params(labelbottom=True)
+        ax.set_xlim(x_limits)
+        ax.grid(True, linestyle=':', alpha=0.3)
+        ax.set_ylabel('')
+        
+        ax.set_title(f"Sample {i+1}", fontsize=10)
+    
+    fig.suptitle(f"Sample densities of {patient_id}", fontsize=16)
+    plt.tight_layout(rect=[0, 0.03, 1, 0.97])
+
+    filename = f"cna_density_plots/distinct_gmm/{patient_id}.png"
+    plt.savefig(filename, dpi=150)
+    plt.close(fig)
+
+
 def sample_single_dataframe(df, sample_size, num_samples):
     
     values = df['logR'].values
@@ -150,12 +226,10 @@ def sample_single_dataframe(df, sample_size, num_samples):
     nan_counts_in_window = np.convolve(is_nan, np.ones(sample_size, dtype=int), mode='valid')
 
     # Take only the start indices where there are no NaNs in the window
-    valid_start_indices = np.where(nan_counts_in_window == 0)[0]
+    valid_start_indices = np.where(nan_counts_in_window <= (sample_size / 10))[0]
 
     if len(valid_start_indices) == 0:
         print(f"No valid samples available for dataframe '{df.attrs['name']}'. Returning empty results.")
-        features_df = pd.DataFrame(columns=['mean1', 'mean2', 'var1', 'var2'])
-        features_df.attrs['name'] = df.attrs['name']
         return None
     if len(valid_start_indices) < num_samples:
         print(f"Only {len(valid_start_indices)} valid samples available, requested {num_samples}. Reducing number of samples.")
@@ -165,16 +239,16 @@ def sample_single_dataframe(df, sample_size, num_samples):
     # Create indexes matrix 
     idx_matrix = start_indices[:, None] + np.arange(sample_size)
 
-    # Extract logR values in a matrix with dim: num_samples x sample_size
-    samples_matrix = df['logR'].values[idx_matrix]
+    # Extract logR values in a matrix with dim: num_samples x sample_size; the few NaNs are filled with median log2R
+    median_log2R = df['logR'].median()
+    samples_matrix = df['logR'].fillna(median_log2R).values[idx_matrix]
 
     def get_gmm_params(row):
 
         row_reshaped = row.reshape(-1, 1)
 
         try:
-
-            gmm = GaussianMixture(n_components=2, covariance_type='full', n_init=1, random_state=42)
+            gmm = GaussianMixture(n_components=2, covariance_type='full', n_init=1, max_iter=100, random_state=42)
             gmm.fit(row_reshaped)
 
             means = gmm.means_.flatten()
@@ -198,7 +272,8 @@ def sample_single_dataframe(df, sample_size, num_samples):
     features_df = pd.DataFrame(features_matrix, columns=['mean1', 'mean2', 'var1', 'var2'])
     features_df.attrs['name'] = df.attrs['name']
 
-    #plot_sample_densities(samples_matrix, df.attrs['name'], x_limits=(bins[0], bins[-1]))
+    
+    plot_samples_with_gmm(samples_matrix, df.attrs['name'], x_limits=(-1,1))
     return features_matrix, features_df
 
 def sample_dataframe_list(df_list, sample_size=30, num_samples=1000):
